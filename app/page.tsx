@@ -4,7 +4,6 @@ import { useChat } from '@ai-sdk/react';
 import ChatInput from '@/component/chat-input';
 import Sidebar from '@/component/sidebar';
 import ToolView from '@/component/tool-view';
-import GraphPanel from '@/component/graph-panel';
 import SubAgentsPanel from '@/component/subagents-panel';
 import type { OrchestratorAgentUIMessage } from '@/agent/orchestrator-agent';
 import type { GraphNode, SubAgentRecord } from '@/lib/chat-store';
@@ -425,7 +424,6 @@ function ChatInterface({
 
       <aside className="w-full lg:w-[420px] shrink-0 border-t lg:border-t-0 lg:border-l border-gray-200 bg-gray-50">
         <div className="h-full overflow-y-auto p-4 space-y-4">
-          <GraphPanel graph={graph} />
           <SubAgentsPanel subAgents={subAgents} />
         </div>
       </aside>
