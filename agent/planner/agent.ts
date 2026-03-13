@@ -1,4 +1,4 @@
-import { createOrchestratorTools } from '@/tool/orchestrator-tools';
+import { createPlannerTools } from '@/agent/planner/tools';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { ToolLoopAgent, InferAgentUIMessage } from 'ai';
 
@@ -58,22 +58,22 @@ For complex tasks, you MUST strictly follow this workflow below:
 - Task B depends on Task A's output (forced sequential via dependency)
 `;
 
-export const orchestratorAgent = new ToolLoopAgent({
+export const PlannerAgent = new ToolLoopAgent({
   model: kimiClient(process.env.OPENAI_MODEL ?? 'kimi-k2.5'),
   instructions: SYSTEM_PROMPT,
-  tools: createOrchestratorTools('__default__'),
+  tools: createPlannerTools('__default__'),
 });
 
-export type OrchestratorAgentUIMessage = InferAgentUIMessage<typeof orchestratorAgent>;
+export type PlannerAgentUIMessage = InferAgentUIMessage<typeof PlannerAgent>;
 
-export function createOrchestratorAgent(
+export function createPlannerAgent(
   chatId: string,
   options?: { autoApprove?: boolean },
 ) {
   return new ToolLoopAgent({
     model: kimiClient(process.env.OPENAI_MODEL ?? 'kimi-k2.5'),
     instructions: SYSTEM_PROMPT,
-    tools: createOrchestratorTools(chatId),
+    tools: createPlannerTools(chatId),
     experimental_context: {
       autoApprove: options?.autoApprove,
     },

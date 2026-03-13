@@ -1,4 +1,4 @@
-import { createOrchestratorAgent } from '@/agent/orchestrator-agent';
+import { createPlannerAgent } from '@/agent/planner/agent';
 import { createAgentUIStreamResponse } from 'ai';
 
 export async function POST(request: Request) {
@@ -20,7 +20,7 @@ export async function POST(request: Request) {
   const autoApprove = autoApproveFromEnv || autoApproveFromBody === true;
 
   return createAgentUIStreamResponse({
-    agent: createOrchestratorAgent(chatId, { autoApprove }),
+    agent: createPlannerAgent(chatId, { autoApprove }),
     uiMessages: messages,
   });
 }

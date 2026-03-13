@@ -5,7 +5,7 @@ import ChatInput from '@/component/chat-input';
 import Sidebar from '@/component/sidebar';
 import ToolView from '@/component/tool-view';
 import SubAgentsPanel from '@/component/subagents-panel';
-import type { OrchestratorAgentUIMessage } from '@/agent/orchestrator-agent';
+import type { PlannerAgentUIMessage } from '@/agent/planner/agent';
 import type { GraphNode, SubAgentRecord } from '@/lib/chat-store';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Loader2, BrainCircuit, ChevronDown, ChevronRight } from 'lucide-react';
@@ -102,7 +102,7 @@ function ChatInterface({
   onChatUpdate: (chat: any) => void;
 }) {
   const { status, sendMessage, messages, stop, setMessages, addToolApprovalResponse } =
-    useChat<OrchestratorAgentUIMessage>({
+    useChat<PlannerAgentUIMessage>({
     id: chatId,
   });
 
@@ -298,7 +298,7 @@ function ChatInterface({
           {messages.length === 0 && (
               <div className="flex flex-col items-center justify-center h-full text-gray-400">
                   <BrainCircuit size={48} className="mb-4 opacity-50" />
-                  <h2 className="text-xl font-semibold mb-2">Orchestrator Agent</h2>
+                  <h2 className="text-xl font-semibold mb-2">Planner Agent</h2>
                   <p className="text-sm">Ready to help you plan and execute tasks.</p>
               </div>
           )}
