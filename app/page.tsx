@@ -232,134 +232,147 @@ function ChatInterface({
   return (
     <div className="flex flex-col lg:flex-row h-screen bg-[#F0F8FF]">
       <div className="flex-1 min-w-0 flex flex-col">
-        <div className="flex-1 overflow-y-auto p-4 scroll-smooth">
-          {messages.length === 0 && (
-              <div className="flex flex-col items-center justify-center h-full text-gray-500">
-                  <div className="bg-white p-8 rounded-full border-4 border-[var(--doraemon-blue)] shadow-[8px_8px_0px_rgba(0,0,0,1)] mb-6">
-                    <BrainCircuit size={64} className="text-[var(--doraemon-blue)]" />
-                  </div>
-                  <h2 className="text-3xl font-black mb-2 text-gray-900 tracking-tight">Doraemon Agent</h2>
-                  <p className="text-lg font-medium text-gray-600">What can I help you with today?</p>
-              </div>
-          )}
+        {messages.length === 0 ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-4">
+            <div className="bg-white p-8 rounded-full border-4 border-[var(--doraemon-blue)] shadow-[8px_8px_0px_rgba(0,0,0,1)] mb-6">
+              <BrainCircuit size={64} className="text-[var(--doraemon-blue)]" />
+            </div>
+            <h2 className="text-3xl font-black mb-2 text-gray-900 tracking-tight">Doraemon Agent</h2>
+            <p className="text-lg font-medium text-gray-600 mb-8">What can I help you with today?</p>
+            <div className="w-full max-w-3xl">
+              <ChatInput
+                status={status}
+                onSubmit={text =>
+                  sendMessage({ text }, { body: { id: chatId, autoApprove: autoApproveAfter } })
+                }
+                stop={stop}
+                isCentered={true}
+              />
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="flex-1 overflow-y-auto p-4 scroll-smooth">
+              <div className="space-y-6 max-w-3xl mx-auto pb-4">
+                  {messages.map(message => (
+                  <div key={message.id} className={`flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
+                      <div className={`
+                          px-6 py-4 rounded-2xl max-w-[90%] lg:max-w-[80%] transition-all
+                          ${message.role === 'user' 
+                              ? 'bg-[var(--doraemon-yellow)] text-gray-900 border-2 border-gray-900 shadow-[4px_4px_0px_rgba(0,0,0,1)] rounded-br-none' 
+                              : 'bg-white border-2 border-gray-900 text-gray-900 shadow-[4px_4px_0px_rgba(0,0,0,1)] rounded-bl-none'}
+                      `}>
+                      <div className={`font-bold text-xs mb-2 uppercase tracking-wide ${message.role === 'user' ? 'text-gray-700' : 'text-[var(--doraemon-blue)]'}`}>
+                          {message.role === 'user' ? 'You' : 'Agent'}
+                      </div>
+                      
+                <div className="space-y-2 overflow-hidden">
+                          {message.parts?.map((part, index) => {
+                              if (!part || typeof part !== 'object') return null;
+                              const partType = (part as any).type;
+                              if (!partType) return null;
+                              switch (partType) {
+                              case 'text':
+                                  {
+                                    const text = (part as { text?: string }).text;
+                                    if (typeof text !== 'string') return null;
+                                  return (
+                                      <div key={index} className="prose prose-sm max-w-none dark:prose-invert">
+                                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+                                      </div>
+                                  );
+                                }
 
-          <div className="space-y-6 max-w-3xl mx-auto pb-4">
-              {messages.map(message => (
-              <div key={message.id} className={`flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
-                  <div className={`
-                      px-6 py-4 rounded-2xl max-w-[90%] lg:max-w-[80%] transition-all
-                      ${message.role === 'user' 
-                          ? 'bg-[var(--doraemon-yellow)] text-gray-900 border-2 border-gray-900 shadow-[4px_4px_0px_rgba(0,0,0,1)] rounded-br-none' 
-                          : 'bg-white border-2 border-gray-900 text-gray-900 shadow-[4px_4px_0px_rgba(0,0,0,1)] rounded-bl-none'}
-                  `}>
-                  <div className={`font-bold text-xs mb-2 uppercase tracking-wide ${message.role === 'user' ? 'text-gray-700' : 'text-[var(--doraemon-blue)]'}`}>
-                      {message.role === 'user' ? 'You' : 'Agent'}
-                  </div>
-                  
-            <div className="space-y-2 overflow-hidden">
-                      {message.parts?.map((part, index) => {
-                          if (!part || typeof part !== 'object') return null;
-                          const partType = (part as any).type;
-                          if (!partType) return null;
-                          switch (partType) {
-                          case 'text':
-                              {
-                                const text = (part as { text?: string }).text;
-                                if (typeof text !== 'string') return null;
-                              return (
-                                  <div key={index} className="prose prose-sm max-w-none dark:prose-invert">
-                                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
-                                  </div>
-                              );
-                            }
+                              case 'reasoning': 
+                                  {
+                                    const text = (part as { text?: string }).text;
+                                    if (typeof text !== 'string') return null;
+                                    return <ThinkingBlock key={index} content={text} isComplete={status !== 'streaming' || index < (message.parts?.length ?? 0) - 1 || messages.indexOf(message) < messages.length - 1} />;
+                                  }
 
-                          case 'reasoning': 
-                              {
-                                const text = (part as { text?: string }).text;
-                                if (typeof text !== 'string') return null;
-                                return <ThinkingBlock key={index} content={text} isComplete={status !== 'streaming' || index < (message.parts?.length ?? 0) - 1 || messages.indexOf(message) < messages.length - 1} />;
+                              case 'step-start':
+                                  return (
+                                      <div key={index} className="flex items-center gap-2 text-xs text-gray-400 my-1 animate-pulse">
+                                          <BrainCircuit size={12} />
+                                          <span>Thinking...</span>
+                                      </div>
+                                  );
+                              
+                              case 'tool-create_subagent': {
+                                   const p = part as any;
+                                   return <ToolView key={index} invocation={{ 
+                                       toolName: 'create_subagent', 
+                                     args: p.args || p.toolInvocation?.args || p.input || p.toolInvocation?.input, 
+                                     result: p.result || p.toolInvocation?.result || p.output || p.toolInvocation?.output,
+                                       state: 'result',
+                                       toolCallId: p.toolCallId || p.toolInvocation?.toolCallId || 'unknown'
+                                   }} />;
                               }
 
-                          case 'step-start':
-                              return (
-                                  <div key={index} className="flex items-center gap-2 text-xs text-gray-400 my-1 animate-pulse">
-                                      <BrainCircuit size={12} />
-                                      <span>Thinking...</span>
-                                  </div>
-                              );
-                          
-                          case 'tool-create_subagent': {
-                               const p = part as any;
-                               return <ToolView key={index} invocation={{ 
-                                   toolName: 'create_subagent', 
-                                 args: p.args || p.toolInvocation?.args || p.input || p.toolInvocation?.input, 
-                                 result: p.result || p.toolInvocation?.result || p.output || p.toolInvocation?.output,
-                                   state: 'result',
-                                   toolCallId: p.toolCallId || p.toolInvocation?.toolCallId || 'unknown'
-                               }} />;
-                          }
+                              case 'tool-plan_subtask_graph': {
+                                   const p = part as any;
+                                   return <ToolView key={index} invocation={{ 
+                                       toolName: 'plan_subtask_graph', 
+                                     args: p.args || p.toolInvocation?.args || p.input || p.toolInvocation?.input, 
+                                     result: p.result || p.toolInvocation?.result || p.output || p.toolInvocation?.output,
+                                       state: p.state || p.toolInvocation?.state,
+                                       toolCallId: p.toolCallId || p.toolInvocation?.toolCallId || 'unknown',
+                                       approval: p.approval || p.toolInvocation?.approval
+                                   }}
+                                   onApprove={id => submitApproval(id, true)}
+                                   onReject={(id, reason) => submitApproval(id, false, reason)}
+                                   onAutoApproveAfter={id => submitApproval(id, true, undefined, true)}
+                                   />;
+                              }
 
-                          case 'tool-plan_subtask_graph': {
-                               const p = part as any;
-                               return <ToolView key={index} invocation={{ 
-                                   toolName: 'plan_subtask_graph', 
-                                 args: p.args || p.toolInvocation?.args || p.input || p.toolInvocation?.input, 
-                                 result: p.result || p.toolInvocation?.result || p.output || p.toolInvocation?.output,
-                                   state: p.state || p.toolInvocation?.state,
-                                   toolCallId: p.toolCallId || p.toolInvocation?.toolCallId || 'unknown',
-                                   approval: p.approval || p.toolInvocation?.approval
-                               }}
-                               onApprove={id => submitApproval(id, true)}
-                               onReject={(id, reason) => submitApproval(id, false, reason)}
-                               onAutoApproveAfter={id => submitApproval(id, true, undefined, true)}
-                               />;
-                          }
+                              case 'tool-assign_task': {
+                                   const p = part as any;
+                                   return <ToolView key={index} invocation={{ 
+                                       toolName: 'assign_task', 
+                                     args: p.args || p.toolInvocation?.args || p.input || p.toolInvocation?.input, 
+                                     result: p.result || p.toolInvocation?.result || p.output || p.toolInvocation?.output,
+                                       state: 'result',
+                                       toolCallId: p.toolCallId || p.toolInvocation?.toolCallId || 'unknown'
+                                   }} />;
+                              }
 
-                          case 'tool-assign_task': {
-                               const p = part as any;
-                               return <ToolView key={index} invocation={{ 
-                                   toolName: 'assign_task', 
-                                 args: p.args || p.toolInvocation?.args || p.input || p.toolInvocation?.input, 
-                                 result: p.result || p.toolInvocation?.result || p.output || p.toolInvocation?.output,
-                                   state: 'result',
-                                   toolCallId: p.toolCallId || p.toolInvocation?.toolCallId || 'unknown'
-                               }} />;
-                          }
-
-                          default:
-                               return null;
-                          }
-                      })}
-                      {!message.parts && (message as any).content && (
-                          <div className="prose prose-sm max-w-none dark:prose-invert">
-                               <ReactMarkdown remarkPlugins={[remarkGfm]}>{(message as any).content}</ReactMarkdown>
-                          </div>
-                      )}
+                              default:
+                                   return null;
+                              }
+                          })}
+                          {!message.parts && (message as any).content && (
+                              <div className="prose prose-sm max-w-none dark:prose-invert">
+                                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{(message as any).content}</ReactMarkdown>
+                              </div>
+                          )}
+                      </div>
+                      </div>
                   </div>
-                  </div>
+                  ))}
+                  
+                  {status === 'streaming' && (
+                      <div className="flex items-center gap-2 text-gray-400 text-sm ml-4">
+                          <Loader2 size={14} className="animate-spin" />
+                          <span>Agent is working...</span>
+                      </div>
+                  )}
               </div>
-              ))}
-              
-              {status === 'streaming' && (
-                  <div className="flex items-center gap-2 text-gray-400 text-sm ml-4">
-                      <Loader2 size={14} className="animate-spin" />
-                      <span>Agent is working...</span>
-                  </div>
-              )}
-          </div>
-        </div>
+            </div>
 
-        <div className="border-t border-gray-200 bg-gray-50">
-          <div className="w-full max-w-3xl mx-auto px-4 py-4">
-            <ChatInput
-              status={status}
-              onSubmit={text =>
-                sendMessage({ text }, { body: { id: chatId, autoApprove: autoApproveAfter } })
-              }
-              stop={stop}
-            />
-          </div>
-        </div>
+            <div className="border-t border-gray-200 bg-gray-50">
+              <div className="w-full max-w-3xl mx-auto px-4 py-4">
+                <ChatInput
+                  status={status}
+                  onSubmit={text =>
+                    sendMessage({ text }, { body: { id: chatId, autoApprove: autoApproveAfter } })
+                  }
+                  stop={stop}
+                  isCentered={false}
+                />
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
