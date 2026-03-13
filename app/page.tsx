@@ -4,7 +4,6 @@ import { useChat } from '@ai-sdk/react';
 import ChatInput from '@/component/chat-input';
 import Sidebar from '@/component/sidebar';
 import ToolView from '@/component/tool-view';
-import SubAgentsPanel from '@/component/subagents-panel';
 import type { PlannerAgentUIMessage } from '@/agent/planner/agent';
 import type { GraphNode, SubAgentRecord } from '@/lib/chat-store';
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -12,8 +11,6 @@ import { Loader2, BrainCircuit, ChevronDown, ChevronRight } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { checkAuth } from '@/app/actions/auth';
-import LoginOverlay from '@/component/login-overlay';
 
 // --- Types ---
 
@@ -91,14 +88,10 @@ function ThinkingBlock({ content, isComplete }: { content: string, isComplete?: 
 function ChatInterface({ 
   chatId, 
   initialMessages, 
-  initialGraph,
-  initialSubAgents,
   onChatUpdate 
 }: { 
   chatId: string; 
   initialMessages: any[];
-  initialGraph: GraphNode[];
-  initialSubAgents: SubAgentRecord[];
   onChatUpdate: (chat: any) => void;
 }) {
   const { status, sendMessage, messages, stop, setMessages, addToolApprovalResponse } =
@@ -110,17 +103,7 @@ function ChatInterface({
     setMessages(initialMessages);
   }, [initialMessages, setMessages]); // Added dependencies
 
-  const [graph, setGraph] = useState<GraphNode[]>(initialGraph ?? []);
-  const [subAgents, setSubAgents] = useState<SubAgentRecord[]>(initialSubAgents ?? []);
   const [autoApproveAfter, setAutoApproveAfter] = useState(false);
-
-  useEffect(() => {
-    setGraph(initialGraph ?? []);
-  }, [initialGraph]);
-
-  useEffect(() => {
-    setSubAgents(initialSubAgents ?? []);
-  }, [initialSubAgents]);
 
   useEffect(() => {
     const fromMessages = new Map<string, string>();
@@ -141,30 +124,8 @@ function ChatInterface({
 
     if (fromMessages.size === 0) return;
 
-    setSubAgents(prev => {
-      let changed = false;
-      const next = [...(prev ?? [])];
-      for (const [name, system_prompt] of fromMessages.entries()) {
-        const idx = next.findIndex(a => a.name === name);
-        if (idx < 0) {
-          next.push({ name, system_prompt });
-          changed = true;
-          continue;
-        }
-        const current = (next[idx]?.system_prompt ?? '').trim();
-        const incoming = system_prompt.trim();
-        if (!current && incoming) {
-          next[idx] = { name, system_prompt };
-          changed = true;
-        }
-      }
-      if (changed) {
-        void saveChatToApi({ id: chatId, subAgents: next });
-        onChatUpdate({ id: chatId, subAgents: next });
-        return next;
-      }
-      return prev;
-    });
+    // Note: We're still keeping the data sync logic, just not keeping it in local state for UI display
+    // as the subagents panel has been removed.
   }, [chatId, initialMessages, onChatUpdate]);
 
   const processedToolCallIds = useRef<Set<string>>(new Set());
@@ -229,29 +190,7 @@ function ChatInterface({
       try {
         const serverChat = await fetchChat(chatId);
         if (cancelled || !serverChat) return;
-
-        const nextGraph = (serverChat.graph ?? []) as GraphNode[];
-        const nextSubAgents = (serverChat.subAgents ?? []) as SubAgentRecord[];
-
-        setGraph(prev => {
-          if (prev.length === nextGraph.length && prev.every((n, i) => {
-            const m = nextGraph[i];
-            return m && n.task === m.task && n.status === m.status && JSON.stringify(n.dependencies) === JSON.stringify(m.dependencies);
-          })) {
-            return prev;
-          }
-          return nextGraph;
-        });
-
-        setSubAgents(prev => {
-          if (prev.length === nextSubAgents.length && prev.every((a, i) => {
-            const b = nextSubAgents[i];
-            return b && a.name === b.name && a.system_prompt === b.system_prompt;
-          })) {
-            return prev;
-          }
-          return nextSubAgents;
-        });
+        // Data is polled but no longer kept in local state for UI display
       } catch {
       }
     }, 2000);
@@ -283,7 +222,6 @@ function ChatInterface({
 
           processedToolCallIds.current.add(toolCallId);
           const nextGraph = nodes as GraphNode[];
-          setGraph(nextGraph);
           void saveChatToApi({ id: chatId, graph: nextGraph });
           onChatUpdate({ id: chatId, graph: nextGraph });
         }
@@ -421,12 +359,6 @@ function ChatInterface({
           </div>
         </div>
       </div>
-
-      <aside className="w-full lg:w-[420px] shrink-0 border-t lg:border-t-0 lg:border-l border-gray-200 bg-gray-50">
-        <div className="h-full overflow-y-auto p-4 space-y-4">
-          <SubAgentsPanel subAgents={subAgents} />
-        </div>
-      </aside>
     </div>
   );
 }
@@ -434,21 +366,9 @@ function ChatInterface({
 // --- Main Page Component ---
 
 export default function ChatPage() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isAuthChecking, setIsAuthChecking] = useState(true);
-
-  useEffect(() => {
-    checkAuth().then(res => {
-      setIsAuthenticated(res.isAuthenticated);
-      setIsAuthChecking(false);
-    });
-  }, []);
-
   const [chats, setChats] = useState<ChatSession[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [initialMessages, setInitialMessages] = useState<any[]>([]);
-  const [initialGraph, setInitialGraph] = useState<GraphNode[]>([]);
-  const [initialSubAgents, setInitialSubAgents] = useState<SubAgentRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadChats = useCallback(async () => {
@@ -467,15 +387,11 @@ export default function ChatPage() {
 
     // Reset messages first to avoid flash of old content
     setInitialMessages([]); 
-    setInitialGraph([]);
-    setInitialSubAgents([]);
     setCurrentChatId(id);
 
     const chat = await fetchChat(id);
     if (chat) {
       setInitialMessages(chat.messages || []);
-      setInitialGraph(chat.graph || []);
-      setInitialSubAgents(chat.subAgents || []);
     }
   };
 
@@ -483,8 +399,6 @@ export default function ChatPage() {
     const newId = uuidv4();
     setCurrentChatId(newId);
     setInitialMessages([]);
-    setInitialGraph([]);
-    setInitialSubAgents([]);
   };
 
   const handleDeleteChat = async (id: string) => {
@@ -492,8 +406,6 @@ export default function ChatPage() {
     if (currentChatId === id) {
         setCurrentChatId(null);
         setInitialMessages([]);
-        setInitialGraph([]);
-        setInitialSubAgents([]);
     }
     await loadChats();
   };
@@ -521,18 +433,6 @@ export default function ChatPage() {
     }
   }, [loading, chats.length, currentChatId]);
 
-  if (isAuthChecking) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-gray-50">
-        <Loader2 className="animate-spin text-blue-600" size={32} />
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return <LoginOverlay onLogin={() => setIsAuthenticated(true)} />;
-  }
-
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar 
@@ -550,8 +450,6 @@ export default function ChatPage() {
                 key={currentChatId}
                 chatId={currentChatId}
                 initialMessages={initialMessages}
-                initialGraph={initialGraph}
-                initialSubAgents={initialSubAgents}
                 onChatUpdate={handleChatUpdate}
             />
         ) : (
