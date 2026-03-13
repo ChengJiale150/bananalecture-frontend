@@ -1,6 +1,6 @@
 'use client';
 
-import { CheckCircle2, Circle, Clock, ChevronDown, ChevronRight, PlayCircle } from 'lucide-react';
+import { CheckCircle2, Circle, Clock, ChevronDown, ChevronRight, PlayCircle, Bot, Network, Workflow } from 'lucide-react';
 import mermaid from 'mermaid';
 import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
@@ -94,7 +94,7 @@ export default function ToolView({
 
   if (!args) {
     return (
-        <div className="my-2 p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono text-gray-500">
+        <div className="my-2 p-3 bg-white border-2 border-gray-200 rounded-xl text-sm font-mono text-gray-500 animate-pulse">
             Loading tool {toolName}...
         </div>
     );
@@ -102,24 +102,23 @@ export default function ToolView({
 
   if (toolName === 'create_subagent') {
     return (
-      <div className="my-2 p-3 bg-indigo-50 border border-indigo-100 rounded-lg text-sm">
+      <div className="my-4 p-4 bg-white border-2 border-[var(--doraemon-blue)] rounded-xl shadow-[4px_4px_0px_var(--doraemon-blue)]">
         <button 
             onClick={() => setIsExpanded(!isExpanded)}
-            className="w-full flex items-center justify-between font-medium text-indigo-700 mb-1 hover:text-indigo-900 transition-colors"
+            className="w-full flex items-center justify-between font-bold text-[var(--doraemon-blue)] mb-1 hover:brightness-110 transition-all"
         >
             <div className="flex items-center gap-2">
-                <CheckCircle2 size={16} />
-                Created Sub-Agent: {args.name}
+                <Bot size={20} />
+                <span>Created Sub-Agent: {args.name}</span>
             </div>
-            {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            {isExpanded ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
         </button>
         
         {isExpanded && (
-            <div className="mt-2 pl-6 animate-in fade-in slide-in-from-top-2 duration-200">
-                <div className="text-gray-600 text-xs bg-white p-2 rounded border border-indigo-50 mb-2 prose prose-xs max-w-none">
+            <div className="mt-4 animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="text-gray-600 text-xs bg-blue-50 p-3 rounded-lg border-2 border-blue-100 mb-2 prose prose-xs max-w-none">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{args.system_prompt}</ReactMarkdown>
                 </div>
-                {/* Result hidden as requested */}
             </div>
         )}
       </div>
@@ -159,54 +158,60 @@ export default function ToolView({
         }
     });
 
-    // Styles
-    chart += '    classDef completed fill:#f0fdf4,stroke:#22c55e,stroke-width:2px;\n';
-    chart += '    classDef inprogress fill:#fefce8,stroke:#eab308,stroke-width:2px,stroke-dasharray: 5 5;\n';
-    chart += '    classDef pending fill:#f9fafb,stroke:#9ca3af,stroke-width:2px;\n';
+    // Styles - Updated for Doraemon Theme
+    chart += '    classDef completed fill:#ffffff,stroke:#0096E6,stroke-width:3px,color:#333;\n';
+    chart += '    classDef inprogress fill:#FFD700,stroke:#333,stroke-width:3px,stroke-dasharray: 5 5,color:#333;\n';
+    chart += '    classDef pending fill:#f0f0f0,stroke:#999,stroke-width:2px,stroke-dasharray: 2 2,color:#999;\n';
 
     return (
-      <div className="my-2 p-3 bg-emerald-50 border border-emerald-100 rounded-lg text-sm">
-        <div className="font-medium text-emerald-700 mb-2 flex items-center gap-2">
-            <Clock size={16} />
+      <div className="my-4 p-4 bg-white border-2 border-[var(--doraemon-yellow)] rounded-xl shadow-[4px_4px_0px_var(--doraemon-yellow)]">
+        <div className="font-bold text-gray-900 mb-4 flex items-center gap-2 text-lg">
+            <Network size={24} className="text-[var(--doraemon-yellow)]" />
             Execution Plan
         </div>
-        <div className="bg-white p-2 rounded border border-emerald-50">
+        <div className="bg-white p-4 rounded-xl border-2 border-gray-100 overflow-hidden">
             <Mermaid chart={chart} />
         </div>
+        
         {state === 'approval-requested' && approval?.id && (
-          <div className="mt-3 rounded-lg border border-emerald-100 bg-white p-3 text-xs text-emerald-700">
-            <div className="font-medium mb-2">Need Human Approval</div>
+          <div className="mt-4 rounded-xl border-2 border-[var(--doraemon-red)] bg-red-50 p-4">
+            <div className="font-bold text-[var(--doraemon-red)] mb-3 flex items-center gap-2">
+                <Clock size={20} />
+                Need Human Approval
+            </div>
+            
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => onApprove?.(approval.id)}
-                className="px-3 py-1 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+                className="doraemon-btn bg-green-500 text-white border-green-700 shadow-[2px_2px_0px_#15803d]"
               >
                 Approve
               </button>
               <button
                 onClick={() => setShowRejectInput(true)}
-                className="px-3 py-1 rounded-md bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 transition-colors"
+                className="doraemon-btn bg-white text-red-500 border-red-500 shadow-[2px_2px_0px_#ef4444]"
               >
                 Reject
               </button>
               <button
                 onClick={() => onAutoApproveAfter?.(approval.id)}
-                className="px-3 py-1 rounded-md bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100 transition-colors"
+                className="doraemon-btn bg-gray-200 text-gray-700 border-gray-400 shadow-[2px_2px_0px_#6b7280]"
               >
                 Auto Approve After
               </button>
             </div>
+            
             {showRejectInput && (
-              <div className="mt-3">
-                <div className="text-gray-600 mb-2">Please provide a reason for rejecting the task:</div>
+              <div className="mt-4 bg-white p-3 rounded-xl border-2 border-red-200">
+                <div className="text-gray-700 font-bold mb-2 text-sm">Reason for rejection:</div>
                 <textarea
                   value={rejectReason}
                   onChange={e => setRejectReason(e.target.value)}
-                  className="w-full rounded-md border border-gray-200 p-2 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                  className="w-full rounded-lg border-2 border-gray-300 p-3 text-sm text-gray-800 focus:outline-none focus:border-[var(--doraemon-red)] transition-colors"
                   rows={3}
-                  placeholder="e.g. Merge similar tasks, reduce hierarchy, sort by priority"
+                  placeholder="Tell me why..."
                 />
-                <div className="mt-2 flex items-center gap-2">
+                <div className="mt-3 flex items-center gap-2">
                   <button
                     onClick={() => {
                       if (!rejectReason.trim()) return;
@@ -214,16 +219,16 @@ export default function ToolView({
                       setShowRejectInput(false);
                       setRejectReason('');
                     }}
-                    className="px-3 py-1 rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors"
+                    className="doraemon-btn bg-[var(--doraemon-red)] text-white border-red-800"
                   >
-                    Reject Task
+                    Confirm Reject
                   </button>
                   <button
                     onClick={() => {
                       setShowRejectInput(false);
                       setRejectReason('');
                     }}
-                    className="px-3 py-1 rounded-md text-gray-600 hover:text-gray-800"
+                    className="doraemon-btn bg-gray-200 text-gray-600 border-gray-400"
                   >
                     Cancel
                   </button>
@@ -232,36 +237,35 @@ export default function ToolView({
             )}
           </div>
         )}
-        {/* Tool output hidden as requested */}
       </div>
     );
   }
 
   if (toolName === 'assign_task') {
       return (
-          <div className="my-2 p-3 bg-blue-50 border border-blue-100 rounded-lg text-sm">
+          <div className="my-4 p-4 bg-white border-2 border-[var(--doraemon-red)] rounded-xl shadow-[4px_4px_0px_var(--doraemon-red)]">
               <button 
                   onClick={() => setIsExpanded(!isExpanded)}
-                  className="w-full flex items-center justify-between font-medium text-blue-700 mb-1 hover:text-blue-900 transition-colors"
+                  className="w-full flex items-center justify-between font-bold text-[var(--doraemon-red)] mb-1 hover:brightness-110 transition-colors"
               >
                   <div className="flex items-center gap-2">
-                      <PlayCircle size={16} />
-                      Assigning Task: {args.task} → {args.agent}
+                      <Workflow size={20} />
+                      <span>Assigning Task: {args.task} → {args.agent}</span>
                   </div>
-                  {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                  {isExpanded ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
               </button>
 
               {isExpanded && (
-                  <div className="mt-2 animate-in fade-in slide-in-from-top-2 duration-200">
-                      <div className="text-gray-600 text-xs bg-white p-2 rounded border border-blue-50 prose prose-xs max-w-none">
-                          <strong className="block mb-1">Prompt:</strong>
+                  <div className="mt-4 animate-in fade-in slide-in-from-top-2 duration-200">
+                      <div className="text-gray-600 text-xs bg-red-50 p-3 rounded-lg border-2 border-red-100 prose prose-xs max-w-none">
+                          <strong className="block mb-1 text-[var(--doraemon-red)]">Prompt:</strong>
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>{args.prompt}</ReactMarkdown>
                       </div>
                   </div>
               )}
               
               {isComplete && result && (
-                   <div className="mt-2 pt-2 border-t border-blue-100 text-xs text-green-700 prose prose-xs max-w-none">
+                   <div className="mt-3 pt-3 border-t-2 border-red-100 text-xs text-gray-700 prose prose-xs max-w-none">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>
                           {typeof result === 'object' && result.result ? result.result : JSON.stringify(result)}
                       </ReactMarkdown>
@@ -273,13 +277,16 @@ export default function ToolView({
 
   // Fallback generic tool view
   return (
-    <div className="my-2 p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono">
-      <div className="font-bold text-gray-700 text-xs mb-1">TOOL: {toolName}</div>
-      <div className="bg-white p-2 rounded border border-gray-100 overflow-x-auto text-xs">
+    <div className="my-4 p-4 bg-white border-2 border-gray-900 rounded-xl shadow-[4px_4px_0px_rgba(0,0,0,1)] text-sm font-mono">
+      <div className="font-black text-gray-900 text-xs mb-2 uppercase tracking-widest flex items-center gap-2">
+        <div className="w-3 h-3 bg-[var(--doraemon-blue)] rounded-full"></div>
+        TOOL: {toolName}
+      </div>
+      <div className="bg-gray-50 p-3 rounded-lg border-2 border-gray-200 overflow-x-auto text-xs">
         {JSON.stringify(args, null, 2)}
       </div>
       {isComplete && (
-        <div className="mt-1 pt-1 border-t border-gray-200 text-gray-500 text-xs">
+        <div className="mt-3 pt-2 border-t-2 border-gray-200 text-gray-500 text-xs">
            → {JSON.stringify(result)}
         </div>
       )}

@@ -230,27 +230,29 @@ function ChatInterface({
   }, [messages, chatId, onChatUpdate]);
 
   return (
-    <div className="flex flex-col lg:flex-row h-screen bg-gray-50">
+    <div className="flex flex-col lg:flex-row h-screen bg-[#F0F8FF]">
       <div className="flex-1 min-w-0 flex flex-col">
         <div className="flex-1 overflow-y-auto p-4 scroll-smooth">
           {messages.length === 0 && (
-              <div className="flex flex-col items-center justify-center h-full text-gray-400">
-                  <BrainCircuit size={48} className="mb-4 opacity-50" />
-                  <h2 className="text-xl font-semibold mb-2">Planner Agent</h2>
-                  <p className="text-sm">Ready to help you plan and execute tasks.</p>
+              <div className="flex flex-col items-center justify-center h-full text-gray-500">
+                  <div className="bg-white p-8 rounded-full border-4 border-[var(--doraemon-blue)] shadow-[8px_8px_0px_rgba(0,0,0,1)] mb-6">
+                    <BrainCircuit size={64} className="text-[var(--doraemon-blue)]" />
+                  </div>
+                  <h2 className="text-3xl font-black mb-2 text-gray-900 tracking-tight">Doraemon Agent</h2>
+                  <p className="text-lg font-medium text-gray-600">What can I help you with today?</p>
               </div>
           )}
 
-          <div className="space-y-6 max-w-3xl mx-auto">
+          <div className="space-y-6 max-w-3xl mx-auto pb-4">
               {messages.map(message => (
               <div key={message.id} className={`flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
                   <div className={`
-                      px-4 py-3 rounded-2xl max-w-[90%] lg:max-w-[80%]
+                      px-6 py-4 rounded-2xl max-w-[90%] lg:max-w-[80%] transition-all
                       ${message.role === 'user' 
-                          ? 'bg-gray-100 text-gray-800 rounded-br-none' 
-                          : 'bg-white border border-gray-200 text-gray-800 rounded-bl-none shadow-sm'}
+                          ? 'bg-[var(--doraemon-yellow)] text-gray-900 border-2 border-gray-900 shadow-[4px_4px_0px_rgba(0,0,0,1)] rounded-br-none' 
+                          : 'bg-white border-2 border-gray-900 text-gray-900 shadow-[4px_4px_0px_rgba(0,0,0,1)] rounded-bl-none'}
                   `}>
-                  <div className={`font-bold text-xs mb-1 ${message.role === 'user' ? 'text-gray-500' : 'text-gray-400'}`}>
+                  <div className={`font-bold text-xs mb-2 uppercase tracking-wide ${message.role === 'user' ? 'text-gray-700' : 'text-[var(--doraemon-blue)]'}`}>
                       {message.role === 'user' ? 'You' : 'Agent'}
                   </div>
                   
