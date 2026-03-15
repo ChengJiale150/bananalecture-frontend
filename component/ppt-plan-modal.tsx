@@ -22,9 +22,21 @@ export default function PPTPlanModal({ pptPlan, onUpdate, onClose }: PPTPlanModa
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const handleConfirm = () => {
-    const planData = encodeURIComponent(JSON.stringify({ slides }));
-    router.push(`/preview?plan=${planData}`);
+    try {
+      sessionStorage.setItem('current_ppt_plan', JSON.stringify({ slides }));
+      router.push('/preview');
+    } catch (e) {
+      console.error('Failed to save plan', e);
+      alert('PPT计划过大，无法预览');
+    }
   };
+
+  useEffect(() => {
+    // Sync external pptPlan changes to local state
+    if (JSON.stringify(slides) !== JSON.stringify(pptPlan.slides)) {
+      setSlides(pptPlan.slides);
+    }
+  }, [pptPlan.slides]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
