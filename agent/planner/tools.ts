@@ -2,6 +2,7 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { mutateChat } from '@/lib/chat-store-server';
 import type { Slide, SlideType as ChatStoreSlideType } from '@/lib/chat-store';
+import { v4 as uuidv4 } from 'uuid';
 
 export const SlideSchema = z.object({
   type: z.enum(['cover', 'introduction', 'content', 'summary', 'ending']).describe('Type of the slide'),
@@ -28,6 +29,7 @@ export function createPlannerTools(chatId: string) {
 
       return mutateChat(chatId, chat => {
         const validatedSlides: Slide[] = slides.map(slide => ({
+          id: uuidv4(),
           type: slide.type as ChatStoreSlideType,
           title: slide.title,
           description: slide.description,
@@ -36,6 +38,7 @@ export function createPlannerTools(chatId: string) {
 
         return { 
           result: 'PPT Plan Created Successfully!', 
+          slides: validatedSlides,
           chat: { ...chat, pptPlan: { slides: validatedSlides } } 
         };
       });

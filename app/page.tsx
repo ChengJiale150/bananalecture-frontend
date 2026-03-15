@@ -6,8 +6,8 @@ import Sidebar from '@/component/sidebar';
 import ToolView from '@/component/tool-view';
 import PPTPlanPreview from '@/component/ppt-plan-preview';
 import type { PlannerAgentUIMessage } from '@/agent/planner/agent';
-import type { GraphNode, SubAgentRecord, Slide } from '@/lib/chat-store';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import type { Slide } from '@/lib/chat-store';
+import { useState, useEffect, useCallback, useRef, memo } from 'react';
 import { Loader2, BrainCircuit, ChevronDown, ChevronRight } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import ReactMarkdown from 'react-markdown';
@@ -39,8 +39,6 @@ async function saveChatToApi(chat: {
   id: string;
   title?: string;
   messages?: any[];
-  graph?: GraphNode[];
-  subAgents?: SubAgentRecord[];
   pptPlan?: any;
 }) {
   await fetch('/api/history', {
@@ -56,7 +54,7 @@ async function deleteChatFromApi(id: string) {
 
 // --- Components ---
 
-function ThinkingBlock({ content, isComplete }: { content: string, isComplete?: boolean }) {
+const ThinkingBlock = memo(function ThinkingBlock({ content, isComplete }: { content: string, isComplete?: boolean }) {
   const [isOpen, setIsOpen] = useState(true);
 
   useEffect(() => {
@@ -83,7 +81,7 @@ function ThinkingBlock({ content, isComplete }: { content: string, isComplete?: 
       )}
     </div>
   );
-}
+});
 
 // --- Chat Interface Component ---
 
@@ -115,29 +113,6 @@ function ChatInterface({
     if (validSlides.length === 0 && initialPptPlan.slides.length > 0) return undefined;
     return { slides: validSlides };
   });
-
-  useEffect(() => {
-    const fromMessages = new Map<string, string>();
-    for (const message of initialMessages ?? []) {
-      const parts = (message as any)?.parts;
-      if (!Array.isArray(parts)) continue;
-      for (const part of parts) {
-        if (part?.type !== 'tool-create_subagent') continue;
-        const args = part?.args || part?.toolInvocation?.args || part?.input || part?.toolInvocation?.input;
-        const name = args?.name;
-        const system_prompt = args?.system_prompt;
-        if (typeof name !== 'string' || typeof system_prompt !== 'string') continue;
-        const incoming = system_prompt.trim();
-        if (!incoming) continue;
-        if (!fromMessages.has(name)) fromMessages.set(name, system_prompt);
-      }
-    }
-
-    if (fromMessages.size === 0) return;
-
-    // Note: We're still keeping the data sync logic, just not keeping it in local state for UI display
-    // as the subagents panel has been removed.
-  }, [chatId, initialMessages, onChatUpdate]);
 
   const processedToolCallIds = useRef<Set<string>>(new Set());
   const processedApprovalIds = useRef<Set<string>>(new Set());
@@ -219,11 +194,12 @@ function ChatInterface({
     onChatUpdate({ id: chatId, pptPlan: newPlan });
   }, [chatId, onChatUpdate]);
 
-  const handleSendMessage = useCallback((text: string) => {
+  const handleSendMessage = useCallback((text: string, options?: any) => {
     const body: any = {
       id: chatId,
       autoApprove: autoApproveAfter,
       pptPlan: pptPlan,
+      ...options
     };
     sendMessage({ text }, { body });
   }, [chatId, autoApproveAfter, pptPlan, sendMessage]);
@@ -241,24 +217,18 @@ function ChatInterface({
             part?.toolCallId || part?.toolInvocation?.toolCallId || part?.toolInvocation?.toolCallID || 'unknown';
           if (processedToolCallIds.current.has(toolCallId)) continue;
 
-          if (type === 'tool-plan_subtask_graph') {
-            const args = part?.args || part?.toolInvocation?.args || part?.input || part?.toolInvocation?.input;
-            const nodes = args?.nodes;
-            if (!Array.isArray(nodes)) continue;
-
-            processedToolCallIds.current.add(toolCallId);
-            const nextGraph = nodes as GraphNode[];
-            await saveChatToApi({ id: chatId, graph: nextGraph });
-            onChatUpdate({ id: chatId, graph: nextGraph });
-          }
-
           if (type === 'tool-create_ppt_plan') {
             const args = part?.args || part?.toolInvocation?.args || part?.input || part?.toolInvocation?.input;
             const slides = args?.slides;
             if (!Array.isArray(slides)) continue;
 
+            const slidesWithId = slides.map((s: any) => ({
+              ...s,
+              id: s.id || uuidv4(),
+            }));
+
             processedToolCallIds.current.add(toolCallId);
-            const nextPptPlan = { slides };
+            const nextPptPlan = { slides: slidesWithId };
             setPptPlan(nextPptPlan);
             await saveChatToApi({ id: chatId, pptPlan: nextPptPlan });
             onChatUpdate({ id: chatId, pptPlan: nextPptPlan });
@@ -349,40 +319,6 @@ function ChatInterface({
                                    }} />;
                               }
                               
-                              case 'tool-create_subagent': {
-                                   const p = part as any;
-                                   return <ToolView key={index} invocation={{ 
-                                       toolName: 'create_subagent', 
-                                     args: p.args || p.toolInvocation?.args || p.input || p.toolInvocation?.input, 
-                                     result: p.result || p.toolInvocation?.result || p.output || p.toolInvocation?.output,
-                                       state: 'result',
-                                       toolCallId: p.toolCallId || p.toolInvocation?.toolCallId || 'unknown'
-                                   }} />;
-                              }
-
-                              case 'tool-plan_subtask_graph': {
-                                   const p = part as any;
-                                   return <ToolView key={index} invocation={{ 
-                                       toolName: 'plan_subtask_graph', 
-                                     args: p.args || p.toolInvocation?.args || p.input || p.toolInvocation?.input, 
-                                     result: p.result || p.toolInvocation?.result || p.output || p.toolInvocation?.output,
-                                       state: p.state || p.toolInvocation?.state,
-                                       toolCallId: p.toolCallId || p.toolInvocation?.toolCallId || 'unknown',
-                                       approval: p.approval || p.toolInvocation?.approval
-                                   }} />;
-                              }
-
-                              case 'tool-assign_task': {
-                                   const p = part as any;
-                                   return <ToolView key={index} invocation={{ 
-                                       toolName: 'assign_task', 
-                                     args: p.args || p.toolInvocation?.args || p.input || p.toolInvocation?.input, 
-                                     result: p.result || p.toolInvocation?.result || p.output || p.toolInvocation?.output,
-                                       state: 'result',
-                                       toolCallId: p.toolCallId || p.toolInvocation?.toolCallId || 'unknown'
-                                   }} />;
-                              }
-
                               default:
                                    return null;
                               }

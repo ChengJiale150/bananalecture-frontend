@@ -52,6 +52,17 @@ export default function ToolView({
     }
   }, [isComplete, isStreaming]);
 
+  // Auto-refresh PPT plan when tool completes
+  useEffect(() => {
+    if (isComplete && toolName === 'create_ppt_plan') {
+      // Prefer result.slides if available (contains server-generated IDs), fall back to args.slides
+      const slides = invocation.result?.slides || args?.slides;
+      if (slides && Array.isArray(slides)) {
+        window.dispatchEvent(new CustomEvent('ppt-plan-update', { detail: { slides } }));
+      }
+    }
+  }, [isComplete, toolName, args, invocation.result]);
+
   if (!args && isStreaming) {
     return (
         <div className="my-4">

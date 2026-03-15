@@ -1,9 +1,14 @@
 'use client';
 
 import { Sparkles, Maximize2, ChevronRight } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import type { Slide, SlideType } from '@/lib/chat-store';
-import PPTPlanModal from './ppt-plan-modal';
+import dynamic from 'next/dynamic';
+
+// Lazy load the modal for better initial load performance
+const PPTPlanModal = dynamic(() => import('./ppt-plan-modal'), {
+  loading: () => <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"><div className="bg-white p-6 rounded-xl border-2 border-gray-900 animate-pulse">加载编辑器...</div></div>
+});
 
 interface PPTPlanPreviewProps {
   pptPlan: { slides: Slide[] } | undefined;
@@ -13,11 +18,46 @@ interface PPTPlanPreviewProps {
 export default function PPTPlanPreview({ pptPlan, onUpdate }: PPTPlanPreviewProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  if (!pptPlan || pptPlan.slides.length === 0) {
+  // Auto-refresh PPT plan when tool completes (listen to event from ToolView)
+  useEffect(() => {
+    const handlePlanUpdate = (event: CustomEvent) => {
+      const slides = event.detail.slides;
+      if (slides && Array.isArray(slides)) {
+        console.log('Received ppt-plan-update event', slides);
+        onUpdate({ slides });
+      }
+    };
+
+    window.addEventListener('ppt-plan-update', handlePlanUpdate as EventListener);
+    return () => {
+      window.removeEventListener('ppt-plan-update', handlePlanUpdate as EventListener);
+    };
+  }, [onUpdate]);
+
+  const slides = pptPlan?.slides || [];
+  
+  // Use useMemo for dots to avoid unnecessary recalculations
+  const slideDots = useMemo(() => {
+    if (!slides.length) return null;
+    return (
+      <div className="flex items-center gap-1 ml-4 flex-shrink-0">
+        {slides.slice(0, 8).map((slide, index) => (
+          <div
+            key={index}
+            className={`w-2 h-2 rounded-full ${getSlideDotColor(slide.type)}`}
+            title={getSlideTypeLabel(slide.type)}
+          />
+        ))}
+        {slides.length > 8 && (
+          <div className="text-xs text-gray-400">+{slides.length - 8}</div>
+        )}
+      </div>
+    );
+  }, [slides]);
+
+  if (!pptPlan || slides.length === 0) {
     return null;
   }
-
-  const slides = pptPlan.slides;
 
   return (
     <>
@@ -38,18 +78,7 @@ export default function PPTPlanPreview({ pptPlan, onUpdate }: PPTPlanPreviewProp
                   {slides.length > 3 ? ' ...' : ''}
                 </div>
               </div>
-              <div className="flex items-center gap-1 ml-4 flex-shrink-0">
-                {slides.slice(0, 8).map((slide, index) => (
-                  <div
-                    key={index}
-                    className={`w-2 h-2 rounded-full ${getSlideDotColor(slide.type)}`}
-                    title={getSlideTypeLabel(slide.type)}
-                  />
-                ))}
-                {slides.length > 8 && (
-                  <div className="text-xs text-gray-400">+{slides.length - 8}</div>
-                )}
-              </div>
+              {slideDots}
             </div>
             <div className="flex items-center gap-2 text-[var(--doraemon-blue)]">
               <Maximize2 size={18} />

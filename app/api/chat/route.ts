@@ -8,6 +8,9 @@ export async function POST(request: Request) {
   const idFromBody = payload?.id;
   const autoApproveFromBody = payload?.autoApprove;
   const pptPlan = payload?.pptPlan;
+  const pageCount = payload?.pageCount;
+  const audience = payload?.audience;
+  const style = payload?.style;
   const idFromQuery = url.searchParams.get('id');
   const idFromHeader = request.headers.get('x-chat-id');
   const chatId = (idFromBody || idFromQuery || idFromHeader) as string | null;
@@ -21,7 +24,13 @@ export async function POST(request: Request) {
   const autoApprove = autoApproveFromEnv || autoApproveFromBody === true;
 
   return createAgentUIStreamResponse({
-    agent: createPlannerAgent(chatId, { autoApprove, pptPlan }),
+    agent: createPlannerAgent(chatId, { 
+      autoApprove, 
+      pptPlan, 
+      pageCount, 
+      audience, 
+      style 
+    }),
     uiMessages: messages,
   });
 }

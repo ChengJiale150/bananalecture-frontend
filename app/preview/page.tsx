@@ -1,7 +1,7 @@
 'use client';
 
 import { ArrowLeft, Sparkles, FileText, Loader2, Play, RefreshCw, Volume2, Settings, ExternalLink, ChevronDown, Plus, Edit2, Trash2, ChevronUp, ChevronRight, ChevronLeft, Video, Image as ImageIcon } from 'lucide-react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useState, useEffect, Suspense } from 'react';
@@ -26,20 +26,30 @@ interface Dialogue {
 
 function PreviewContent() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [plan, setPlan] = useState<PPTPlan | null>(null);
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
   const [showAdvancedTools, setShowAdvancedTools] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    try {
-      const storedPlan = sessionStorage.getItem('current_ppt_plan');
-      if (storedPlan) {
-        setPlan(JSON.parse(storedPlan));
+    const loadPlan = () => {
+      try {
+        const storedPlan = sessionStorage.getItem('current_ppt_plan');
+        if (storedPlan) {
+          const parsed = JSON.parse(storedPlan);
+          setPlan(parsed);
+        }
+      } catch (e) {
+        console.error('Failed to parse plan data from storage', e);
+      } finally {
+        // Add a slight artificial delay for smoother transition if it's too fast
+        // or just set it to false immediately for performance. 
+        // We'll set it to false immediately to fulfill "speed" requirement.
+        setIsLoading(false);
       }
-    } catch (e) {
-      console.error('Failed to parse plan data from storage', e);
-    }
+    };
+
+    loadPlan();
   }, []);
 
   const currentSlide = plan?.slides[currentSlideIndex];
@@ -50,6 +60,21 @@ function PreviewContent() {
     { id: '2', speaker: '大雄', emotion: 'angry', text: '哆啦A梦，我的作业一塌糊涂！到底该怎么办啊？' },
     { id: '3', speaker: '哆啦A梦', emotion: 'happy', text: '别急，大雄！看我从22世纪带来的神奇道具！' }
   ];
+
+  // Skeleton UI for loading
+  if (isLoading) {
+    return (
+      <div className="h-screen bg-[#F0F8FF] flex flex-col overflow-hidden">
+        <header className="bg-white border-b-4 border-gray-900 shadow-sm h-[72px] animate-pulse" />
+        <div className="flex-1 flex overflow-hidden">
+          <div className="flex-1 p-6 flex flex-col gap-6 overflow-y-auto border-r-2 border-gray-200">
+            <div className="flex-1 bg-white border-4 border-gray-900 rounded-3xl p-8 shadow-[8px_8px_0px_rgba(0,0,0,1)] animate-pulse" />
+          </div>
+          <div className="w-[450px] bg-white flex flex-col border-l-2 border-gray-200 animate-pulse" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen bg-[#F0F8FF] flex flex-col overflow-hidden">
@@ -115,9 +140,14 @@ function PreviewContent() {
         <div className="px-6 pb-3">
           <div className="flex items-center gap-4">
             <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
-              <div className="h-full bg-[var(--doraemon-blue)] w-[0%] transition-all duration-300"></div>
+              <div 
+                className="h-full bg-[var(--doraemon-blue)] transition-all duration-500 ease-out"
+                style={{ width: `${plan ? ((currentSlideIndex + 1) / plan.slides.length) * 100 : 0}%` }}
+              ></div>
             </div>
-            <span className="text-sm font-bold text-gray-500 min-w-[40px]">0.0%</span>
+            <span className="text-sm font-bold text-gray-500 min-w-[40px]">
+              {plan ? Math.round(((currentSlideIndex + 1) / plan.slides.length) * 100) : 0}%
+            </span>
           </div>
         </div>
       </header>
@@ -133,6 +163,8 @@ function PreviewContent() {
               </div>
               <h2 className="text-4xl font-black text-gray-900 mb-6 text-center">{currentSlide.title}</h2>
               <p className="text-xl text-gray-700 text-center max-w-2xl">{currentSlide.description}</p>
+              
+              {/* Partial loading: only render content if it exists and current slide is active */}
               {currentSlide.content && (
                 <div className="mt-8 p-6 bg-gray-50 rounded-2xl border-2 border-dashed border-gray-300 w-full max-w-3xl overflow-auto max-h-[40vh]">
                   <div className="prose prose-lg max-w-none text-gray-800">
@@ -169,6 +201,8 @@ function PreviewContent() {
               <h3 className="font-black text-gray-900">口播稿对话</h3>
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {/* Partial loading: Only render dialogues if they exist. 
+                  In a real app, these would be fetched per slide. */}
               {dummyDialogues.map((dialogue) => (
                 <div key={dialogue.id} className="bg-white border-2 border-gray-200 rounded-2xl p-4 hover:border-gray-300 transition-colors shadow-sm">
                   <div className="flex items-center justify-between mb-3">

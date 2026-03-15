@@ -1,120 +1,188 @@
-import { promises as fs } from 'fs';
-import path from 'path';
-import { ChatRecord } from './chat-store';
+import db from './db';
+import { ChatRecord, Slide, Dialogue } from './chat-store';
+import { v4 as uuidv4 } from 'uuid';
 
-const DATA_DIR = path.join(process.cwd(), 'data');
-const FILE_PATH = path.join(DATA_DIR, 'chats.json');
+// Helper to parse JSON safely
+function parseJSON<T>(text: string | null, fallback: T): T {
+  if (!text) return fallback;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallback;
+  }
+}
 
-let lock: Promise<void> = Promise.resolve();
+// Helper to reconstruct ChatRecord from DB rows
+function getChatSync(id: string): ChatRecord | null {
+  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as any;
+  if (!project) return null;
 
-async function withLock<T>(fn: () => Promise<T>): Promise<T> {
-  const previous = lock;
-  let release!: () => void;
-  lock = new Promise<void>(resolve => {
-    release = resolve;
+  // Get slides
+  const slidesRows = db.prepare('SELECT * FROM ppt_plans WHERE project_id = ? ORDER BY idx ASC').all(id) as any[];
+  
+  const slides: Slide[] = slidesRows.map(row => {
+    // Get dialogues for this slide
+    const dialoguesRows = db.prepare('SELECT * FROM dialogues WHERE plan_id = ? ORDER BY idx ASC').all(row.id) as any[];
+    
+    const dialogues: Dialogue[] = dialoguesRows.map(dRow => ({
+      id: dRow.id,
+      role: dRow.role,
+      content: dRow.content,
+      emotion: dRow.emotion,
+      speed: dRow.speed,
+      audioPath: dRow.audio_path
+    }));
+
+    return {
+      id: row.id,
+      type: row.type,
+      title: row.title,
+      description: row.description,
+      content: row.content,
+      imagePath: row.image_path,
+      audioPath: row.audio_path,
+      dialogues
+    };
   });
-  await previous;
-  try {
-    return await fn();
-  } finally {
-    release();
-  }
-}
 
-async function ensureData() {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  try {
-    await fs.access(FILE_PATH);
-  } catch {
-    await fs.writeFile(FILE_PATH, JSON.stringify([]), 'utf-8');
-  }
-}
-
-async function readChatsUnlocked(): Promise<ChatRecord[]> {
-  await ensureData();
-  const raw = await fs.readFile(FILE_PATH, 'utf-8');
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as ChatRecord[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-async function writeChatsUnlocked(chats: ChatRecord[]) {
-  await ensureData();
-  const tmpPath = path.join(DATA_DIR, `chats.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`);
-  const payload = JSON.stringify(chats, null, 2);
-
-  const handle = await fs.open(tmpPath, 'w');
-  try {
-    await handle.writeFile(payload, 'utf-8');
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-
-  try {
-    await fs.rename(tmpPath, FILE_PATH);
-  } catch {
-    await fs.rm(FILE_PATH, { force: true });
-    await fs.rename(tmpPath, FILE_PATH);
-  }
+  return {
+    id: project.id,
+    userId: project.user_id,
+    title: project.name,
+    createdAt: project.created_at,
+    updatedAt: project.updated_at,
+    messages: parseJSON(project.messages, []),
+    videoPath: project.video_path,
+    pptPlan: slides.length > 0 ? { slides } : undefined
+  };
 }
 
 export async function getAllChats(): Promise<ChatRecord[]> {
-  return withLock(async () => readChatsUnlocked());
+  const rows = db.prepare('SELECT * FROM projects ORDER BY updated_at DESC').all() as any[];
+  return rows.map(project => ({
+    id: project.id,
+    userId: project.user_id,
+    title: project.name,
+    createdAt: project.created_at,
+    updatedAt: project.updated_at,
+    messages: parseJSON(project.messages, []),
+    videoPath: project.video_path,
+    pptPlan: undefined 
+  }));
 }
 
 export async function getChat(id: string): Promise<ChatRecord | null> {
-  return withLock(async () => {
-    const chats = await readChatsUnlocked();
-    return chats.find(c => c.id === id) ?? null;
-  });
+  return getChatSync(id);
 }
 
 export async function upsertChat(update: Partial<ChatRecord> & { id: string }): Promise<ChatRecord> {
-  return withLock(async () => {
-    const chats = await readChatsUnlocked();
-    const index = chats.findIndex(c => c.id === update.id);
-    const now = Date.now();
+  const { id } = update;
+  const now = Date.now();
 
-    if (index >= 0) {
-      const existing = chats[index];
-      const merged: ChatRecord = {
-        ...existing,
-        ...update,
-        title: update.title ?? existing.title,
-        createdAt: existing.createdAt,
-        messages: 'messages' in update ? (update.messages ?? []) : (existing.messages ?? []),
-        pptPlan: 'pptPlan' in update ? update.pptPlan : existing.pptPlan,
-        graph: 'graph' in update ? update.graph : existing.graph,
-        subAgents: 'subAgents' in update ? update.subAgents : existing.subAgents,
-      };
-      chats[index] = merged;
-      await writeChatsUnlocked(chats);
-      return merged;
-    }
+  const transaction = db.transaction(() => {
+    const existing = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as any;
 
-    const created: ChatRecord = {
-      id: update.id,
-      createdAt: typeof update.createdAt === 'number' ? update.createdAt : now,
-      title: update.title ?? 'New Chat',
-      messages: update.messages ?? [],
-      subAgents: update.subAgents ?? [],
-      graph: update.graph ?? [],
-      pptPlan: update.pptPlan,
-    };
-    if (!created.title || created.title === 'New Chat') {
-      const firstText = (created.messages?.[0] as any)?.content || (created.messages?.[0] as any)?.parts?.find((p: any) => p.type === 'text')?.text;
-      if (typeof firstText === 'string' && firstText.trim()) {
-        created.title = firstText.slice(0, 30);
+    if (existing) {
+      // Update
+      const newTitle = update.title ?? existing.name;
+      const newMessages = 'messages' in update ? JSON.stringify(update.messages) : existing.messages;
+      const newVideoPath = 'videoPath' in update ? update.videoPath : existing.video_path;
+
+      db.prepare(`
+        UPDATE projects 
+        SET name = ?, messages = ?, video_path = ?, updated_at = ?
+        WHERE id = ?
+      `).run(newTitle, newMessages, newVideoPath, now, id);
+
+      if ('pptPlan' in update) {
+        // Replace plans
+        db.prepare('DELETE FROM ppt_plans WHERE project_id = ?').run(id);
+
+        if (update.pptPlan && update.pptPlan.slides) {
+          insertSlides(id, update.pptPlan.slides, now);
+        }
+      }
+
+    } else {
+      // Insert
+      const title = update.title || 'New Chat';
+      // If title is 'New Chat', try to extract from messages like before
+      let finalTitle = title;
+      if (finalTitle === 'New Chat' && update.messages && update.messages.length > 0) {
+         const firstText = (update.messages[0] as any)?.content || (update.messages[0] as any)?.parts?.find((p: any) => p.type === 'text')?.text;
+         if (typeof firstText === 'string' && firstText.trim()) {
+            finalTitle = firstText.slice(0, 30);
+         }
+      }
+
+      db.prepare(`
+        INSERT INTO projects (id, user_id, name, messages, video_path, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        id,
+        update.userId || 'admin',
+        finalTitle,
+        JSON.stringify(update.messages || []),
+        update.videoPath || null,
+        update.createdAt || now,
+        now
+      );
+
+      if (update.pptPlan && update.pptPlan.slides) {
+        insertSlides(id, update.pptPlan.slides, now);
       }
     }
 
-    chats.push(created);
-    await writeChatsUnlocked(chats);
-    return created;
+    return getChatSync(id)!;
+  });
+
+  return transaction();
+}
+
+function insertSlides(projectId: string, slides: Slide[], now: number) {
+  const insertPlan = db.prepare(`
+    INSERT INTO ppt_plans (id, project_id, type, title, description, content, idx, image_path, audio_path, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const insertDialogue = db.prepare(`
+    INSERT INTO dialogues (id, plan_id, role, content, emotion, speed, idx, audio_path, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  slides.forEach((slide, idx) => {
+    const slideId = slide.id || uuidv4();
+    insertPlan.run(
+      slideId,
+      projectId,
+      slide.type,
+      slide.title,
+      slide.description,
+      slide.content || '',
+      idx,
+      slide.imagePath || null,
+      slide.audioPath || null,
+      now,
+      now
+    );
+
+    if (slide.dialogues) {
+      slide.dialogues.forEach((d, dIdx) => {
+        const dId = d.id || uuidv4();
+        insertDialogue.run(
+          dId,
+          slideId,
+          d.role,
+          d.content,
+          d.emotion || null,
+          d.speed || 1.0,
+          dIdx,
+          d.audioPath || null,
+          now,
+          now
+        );
+      });
+    }
   });
 }
 
@@ -122,50 +190,72 @@ export async function mutateChat<T>(
   id: string,
   mutator: (chat: ChatRecord) => { result: T; chat?: ChatRecord },
 ): Promise<T> {
-  return withLock(async () => {
-    const chats = await readChatsUnlocked();
-    const index = chats.findIndex(c => c.id === id);
+  // Use transaction to ensure atomicity
+  const transaction = db.transaction(() => {
+    const existing = getChatSync(id);
     const now = Date.now();
-
-    const existing: ChatRecord =
-      index >= 0
-        ? chats[index]
-        : {
-            id,
-            createdAt: now,
-            title: 'New Chat',
-            messages: [],
-            subAgents: [],
-            graph: [],
-          };
-
-    const { result, chat: next } = mutator(existing);
-    if (!next) return result;
-
-    const merged: ChatRecord = {
-      ...existing,
-      ...next,
+    
+    const chatToMutate = existing || {
       id,
-      createdAt: existing.createdAt,
-      title: next.title ?? existing.title,
-      messages: 'messages' in next ? (next.messages ?? []) : (existing.messages ?? []),
-      pptPlan: 'pptPlan' in next ? next.pptPlan : existing.pptPlan,
-      graph: 'graph' in next ? next.graph : existing.graph,
-      subAgents: 'subAgents' in next ? next.subAgents : existing.subAgents,
-    };
+      userId: 'admin',
+      title: 'New Chat',
+      createdAt: now,
+      updatedAt: now,
+      messages: [],
+    } as ChatRecord;
 
-    if (index >= 0) chats[index] = merged;
-    else chats.push(merged);
+    const { result, chat: next } = mutator(chatToMutate);
 
-    await writeChatsUnlocked(chats);
+    if (next) {
+       const existingRecord = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as any;
+       
+       if (existingRecord) {
+         // Update
+         db.prepare(`
+            UPDATE projects 
+            SET name = ?, messages = ?, video_path = ?, updated_at = ?
+            WHERE id = ?
+         `).run(
+            next.title, 
+            JSON.stringify(next.messages), 
+            next.videoPath || null,
+            now,
+            id
+         );
+         
+         if (next.pptPlan) {
+            db.prepare('DELETE FROM ppt_plans WHERE project_id = ?').run(id);
+            if (next.pptPlan.slides) {
+              insertSlides(id, next.pptPlan.slides, now);
+            }
+         }
+       } else {
+         // Insert
+         db.prepare(`
+            INSERT INTO projects (id, user_id, name, messages, video_path, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            id,
+            next.userId || 'admin',
+            next.title,
+            JSON.stringify(next.messages || []),
+            next.videoPath || null,
+            next.createdAt || now,
+            now
+          );
+
+          if (next.pptPlan && next.pptPlan.slides) {
+            insertSlides(id, next.pptPlan.slides, now);
+          }
+       }
+    }
+
     return result;
   });
+
+  return transaction();
 }
 
 export async function deleteChat(id: string) {
-  return withLock(async () => {
-    const chats = await readChatsUnlocked();
-    const next = chats.filter(c => c.id !== id);
-    await writeChatsUnlocked(next);
-  });
+  db.prepare('DELETE FROM projects WHERE id = ?').run(id);
 }

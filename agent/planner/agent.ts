@@ -9,7 +9,16 @@ const kimiClient = createOpenAICompatible({
   apiKey: process.env.OPENAI_API_KEY ?? '',
 });
 
-function buildSystemPrompt(existingPlan?: PPTPlan) {
+interface PlannerOptions {
+  pptPlan?: PPTPlan;
+  pageCount?: string;
+  audience?: string;
+  style?: string;
+}
+
+function buildSystemPrompt(options?: PlannerOptions) {
+  const { pptPlan: existingPlan, pageCount, audience, style } = options || {};
+
   let prompt = `
 你是一位出色的哆啦A梦教学漫画规划师！你的任务是根据用户的教学内容，创作出生动有趣的哆啦A梦风格教学漫画PPT规划。
 
@@ -54,6 +63,27 @@ function buildSystemPrompt(existingPlan?: PPTPlan) {
 - **画面感强**：每一页都要有清晰的画面描述
 `;
 
+  if (pageCount) {
+    let pageCountText = pageCount;
+    if (pageCount === '15+') pageCountText = '15页以上';
+    else if (pageCount === '5-10') pageCountText = '5-10页';
+    else if (pageCount === '10-15') pageCountText = '10-15页';
+    prompt += `\n- **页数规划**：请规划 ${pageCountText} 的内容。\n`;
+  }
+
+  if (audience) {
+    let audienceText = audience;
+    if (audience === 'beginner') audienceText = '初学者（注重基础，简单易懂）';
+    else if (audience === 'intermediate') audienceText = '有基础（适当深入，注重实践）';
+    else if (audience === 'expert') audienceText = '精通（专业深度，探讨前沿）';
+    prompt += `\n- **目标受众**：${audienceText}。\n`;
+  }
+  
+  if (style && style !== 'doraemon') {
+      // Future proofing for other styles if needed, though currently only doraemon is supported fully in prompt text
+      prompt += `\n- **风格要求**：${style}风格。\n`;
+  }
+
   if (existingPlan && existingPlan.slides && existingPlan.slides.length > 0) {
     prompt += `
 
@@ -94,11 +124,11 @@ export type PlannerAgentUIMessage = InferAgentUIMessage<typeof PlannerAgent>;
 
 export function createPlannerAgent(
   chatId: string,
-  options?: { autoApprove?: boolean; pptPlan?: PPTPlan },
+  options?: { autoApprove?: boolean; pptPlan?: PPTPlan; pageCount?: string; audience?: string; style?: string },
 ) {
   return new ToolLoopAgent({
     model: kimiClient(process.env.OPENAI_MODEL ?? 'kimi-k2.5'),
-    instructions: buildSystemPrompt(options?.pptPlan),
+    instructions: buildSystemPrompt(options),
     tools: createPlannerTools(chatId),
     experimental_context: {
       autoApprove: options?.autoApprove,

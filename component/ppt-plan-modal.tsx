@@ -21,8 +21,21 @@ export default function PPTPlanModal({ pptPlan, onUpdate, onClose }: PPTPlanModa
   const [editingSlide, setEditingSlide] = useState<Slide | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Helper to update local state and notify parent
+  const updateSlides = (newSlides: Slide[]) => {
+    setSlides(newSlides);
+    onUpdate({ slides: newSlides });
+  };
+
+  useEffect(() => {
+    // Prefetch the preview page for faster navigation
+    router.prefetch('/preview');
+  }, [router]);
+
   const handleConfirm = () => {
     try {
+      // Use a slightly more robust way to signal that we are navigating
+      // and maybe avoid massive JSON if possible, but for now we keep it
       sessionStorage.setItem('current_ppt_plan', JSON.stringify({ slides }));
       router.push('/preview');
     } catch (e) {
@@ -32,11 +45,12 @@ export default function PPTPlanModal({ pptPlan, onUpdate, onClose }: PPTPlanModa
   };
 
   useEffect(() => {
-    // Sync external pptPlan changes to local state
+    // Sync external pptPlan changes to local state, but only if they are different
+    // This allows parent updates (e.g. from Agent) to reflect here
     if (JSON.stringify(slides) !== JSON.stringify(pptPlan.slides)) {
       setSlides(pptPlan.slides);
     }
-  }, [pptPlan.slides]);
+  }, [pptPlan.slides]); // Intentionally exclude 'slides' to avoid loop, we use explicit updateSlides
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -47,13 +61,6 @@ export default function PPTPlanModal({ pptPlan, onUpdate, onClose }: PPTPlanModa
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
-
-  useEffect(() => {
-    // Only update if slides actually changed to avoid infinite loops or unnecessary saves
-    if (JSON.stringify(slides) !== JSON.stringify(pptPlan.slides)) {
-      onUpdate({ slides });
-    }
-  }, [slides, onUpdate, pptPlan.slides]);
 
   const getSlideIcon = (type: SlideType) => {
     switch (type) {
@@ -108,34 +115,35 @@ export default function PPTPlanModal({ pptPlan, onUpdate, onClose }: PPTPlanModa
     if (editingSlideIndex === null || !editingSlide) return;
     const newSlides = [...slides];
     newSlides[editingSlideIndex] = editingSlide;
-    setSlides(newSlides);
+    updateSlides(newSlides);
     setEditingSlideIndex(null);
     setEditingSlide(null);
   };
 
   const handleMoveSlideUp = (index: number) => {
     const newSlides = moveSlideUp(slides, index);
-    setSlides(newSlides);
+    updateSlides(newSlides);
   };
 
   const handleMoveSlideDown = (index: number) => {
     const newSlides = moveSlideDown(slides, index);
-    setSlides(newSlides);
+    updateSlides(newSlides);
   };
 
   const deleteSlide = (index: number) => {
     const newSlides = slides.filter((_, i) => i !== index);
-    setSlides(newSlides);
+    updateSlides(newSlides);
   };
 
   const addSlide = () => {
     const newSlide: Slide = {
+      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2) + Date.now().toString(36),
       type: 'content',
       title: '新页面',
       description: '请输入页面描述',
       content: '',
     };
-    setSlides([...slides, newSlide]);
+    updateSlides([...slides, newSlide]);
   };
 
   return (

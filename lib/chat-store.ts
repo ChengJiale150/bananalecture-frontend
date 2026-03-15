@@ -1,10 +1,23 @@
 export type SlideType = 'cover' | 'introduction' | 'content' | 'summary' | 'ending';
 
+export interface Dialogue {
+  id: string;
+  role: string;
+  content: string;
+  emotion?: string;
+  speed?: number;
+  audioPath?: string;
+}
+
 export interface Slide {
+  id: string;
   type: SlideType;
   title: string;
   description: string;
   content?: string;
+  imagePath?: string;
+  audioPath?: string;
+  dialogues?: Dialogue[];
 }
 
 export interface PPTPlan {
@@ -29,25 +42,13 @@ export function moveSlideDown(slides: Slide[], index: number): Slide[] {
   return newSlides;
 }
 
-export type GraphNodeStatus = 'in_progress' | 'pending' | 'completed';
-
-export interface GraphNode {
-  task: string;
-  dependencies: string[];
-  status: GraphNodeStatus;
-}
-
-export interface SubAgentRecord {
-  name: string;
-  system_prompt: string;
-}
-
 export interface ChatRecord {
-  id: string;
-  title: string;
+  id: string; // project_id
+  userId?: string; // default 'admin'
+  title: string; // project_name
   createdAt: number;
-  messages: any[];
-  subAgents?: SubAgentRecord[];
-  graph?: GraphNode[];
+  updatedAt?: number;
+  messages: any[]; // chat_messages
+  videoPath?: string; // video_path
   pptPlan?: PPTPlan;
 }
