@@ -1,6 +1,6 @@
 import { tool } from 'ai';
 import { z } from 'zod';
-import { mutateChat } from '@/lib/chat-store';
+import { mutateChat } from '@/lib/chat-store-server';
 
 const SPECIAL_AGENT_NAME = '__self__';
 

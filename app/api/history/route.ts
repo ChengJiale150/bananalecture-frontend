@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { deleteChat, getAllChats, getChat, upsertChat } from '@/lib/chat-store';
+import { deleteChat, getAllChats, getChat, upsertChat } from '@/lib/chat-store-server';
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);

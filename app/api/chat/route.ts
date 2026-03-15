@@ -7,6 +7,7 @@ export async function POST(request: Request) {
   const messages = payload?.messages ?? [];
   const idFromBody = payload?.id;
   const autoApproveFromBody = payload?.autoApprove;
+  const pptPlan = payload?.pptPlan;
   const idFromQuery = url.searchParams.get('id');
   const idFromHeader = request.headers.get('x-chat-id');
   const chatId = (idFromBody || idFromQuery || idFromHeader) as string | null;
@@ -20,7 +21,7 @@ export async function POST(request: Request) {
   const autoApprove = autoApproveFromEnv || autoApproveFromBody === true;
 
   return createAgentUIStreamResponse({
-    agent: createPlannerAgent(chatId, { autoApprove }),
+    agent: createPlannerAgent(chatId, { autoApprove, pptPlan }),
     uiMessages: messages,
   });
 }

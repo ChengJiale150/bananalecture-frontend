@@ -4,8 +4,9 @@ import { useChat } from '@ai-sdk/react';
 import ChatInput from '@/component/chat-input';
 import Sidebar from '@/component/sidebar';
 import ToolView from '@/component/tool-view';
+import PPTPlanPreview from '@/component/ppt-plan-preview';
 import type { PlannerAgentUIMessage } from '@/agent/planner/agent';
-import type { GraphNode, SubAgentRecord } from '@/lib/chat-store';
+import type { GraphNode, SubAgentRecord, Slide } from '@/lib/chat-store';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Loader2, BrainCircuit, ChevronDown, ChevronRight } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
@@ -40,6 +41,7 @@ async function saveChatToApi(chat: {
   messages?: any[];
   graph?: GraphNode[];
   subAgents?: SubAgentRecord[];
+  pptPlan?: any;
 }) {
   await fetch('/api/history', {
     method: 'POST',
@@ -88,10 +90,12 @@ function ThinkingBlock({ content, isComplete }: { content: string, isComplete?: 
 function ChatInterface({ 
   chatId, 
   initialMessages, 
+  initialPptPlan,
   onChatUpdate 
 }: { 
   chatId: string; 
   initialMessages: any[];
+  initialPptPlan?: { slides: Slide[] };
   onChatUpdate: (chat: any) => void;
 }) {
   const { status, sendMessage, messages, stop, setMessages, addToolApprovalResponse } =
@@ -104,6 +108,13 @@ function ChatInterface({
   }, [initialMessages, setMessages]); // Added dependencies
 
   const [autoApproveAfter, setAutoApproveAfter] = useState(false);
+  const [pptPlan, setPptPlan] = useState<{ slides: Slide[] } | undefined>(() => {
+    if (!initialPptPlan?.slides) return initialPptPlan;
+    // Filter out invalid empty slides that might have been saved due to corruption
+    const validSlides = initialPptPlan.slides.filter(s => s && Object.keys(s).length > 0 && s.type);
+    if (validSlides.length === 0 && initialPptPlan.slides.length > 0) return undefined;
+    return { slides: validSlides };
+  });
 
   useEffect(() => {
     const fromMessages = new Map<string, string>();
@@ -201,32 +212,62 @@ function ChatInterface({
     };
   }, [chatId, status]);
 
+  const handlePptPlanUpdate = useCallback(async (newPlan: { slides: Slide[] }) => {
+    console.log('PPT Plan updated, new slide order:', newPlan.slides.map(s => s.title));
+    setPptPlan(newPlan);
+    await saveChatToApi({ id: chatId, pptPlan: newPlan });
+    onChatUpdate({ id: chatId, pptPlan: newPlan });
+  }, [chatId, onChatUpdate]);
+
+  const handleSendMessage = useCallback((text: string) => {
+    const body: any = {
+      id: chatId,
+      autoApprove: autoApproveAfter,
+      pptPlan: pptPlan,
+    };
+    sendMessage({ text }, { body });
+  }, [chatId, autoApproveAfter, pptPlan, sendMessage]);
+
   useEffect(() => {
-    for (const message of messages) {
-      const parts = (message as any).parts;
-      if (!Array.isArray(parts)) continue;
+    const processMessages = async () => {
+      for (const message of messages) {
+        const parts = (message as any).parts;
+        if (!Array.isArray(parts)) continue;
 
-      for (const part of parts) {
-        if (!part || typeof part !== 'object') continue;
-        const type = (part as any)?.type;
-        if (type !== 'tool-plan_subtask_graph') continue;
+        for (const part of parts) {
+          if (!part || typeof part !== 'object') continue;
+          const type = (part as any)?.type;
+          const toolCallId =
+            part?.toolCallId || part?.toolInvocation?.toolCallId || part?.toolInvocation?.toolCallID || 'unknown';
+          if (processedToolCallIds.current.has(toolCallId)) continue;
 
-        const toolCallId =
-          part?.toolCallId || part?.toolInvocation?.toolCallId || part?.toolInvocation?.toolCallID || 'unknown';
-        if (processedToolCallIds.current.has(toolCallId)) continue;
+          if (type === 'tool-plan_subtask_graph') {
+            const args = part?.args || part?.toolInvocation?.args || part?.input || part?.toolInvocation?.input;
+            const nodes = args?.nodes;
+            if (!Array.isArray(nodes)) continue;
 
-        if (type === 'tool-plan_subtask_graph') {
-          const args = part?.args || part?.toolInvocation?.args || part?.input || part?.toolInvocation?.input;
-          const nodes = args?.nodes;
-          if (!Array.isArray(nodes)) continue;
+            processedToolCallIds.current.add(toolCallId);
+            const nextGraph = nodes as GraphNode[];
+            await saveChatToApi({ id: chatId, graph: nextGraph });
+            onChatUpdate({ id: chatId, graph: nextGraph });
+          }
 
-          processedToolCallIds.current.add(toolCallId);
-          const nextGraph = nodes as GraphNode[];
-          void saveChatToApi({ id: chatId, graph: nextGraph });
-          onChatUpdate({ id: chatId, graph: nextGraph });
+          if (type === 'tool-create_ppt_plan') {
+            const args = part?.args || part?.toolInvocation?.args || part?.input || part?.toolInvocation?.input;
+            const slides = args?.slides;
+            if (!Array.isArray(slides)) continue;
+
+            processedToolCallIds.current.add(toolCallId);
+            const nextPptPlan = { slides };
+            setPptPlan(nextPptPlan);
+            await saveChatToApi({ id: chatId, pptPlan: nextPptPlan });
+            onChatUpdate({ id: chatId, pptPlan: nextPptPlan });
+          }
         }
       }
-    }
+    };
+    
+    void processMessages();
   }, [messages, chatId, onChatUpdate]);
 
   return (
@@ -242,9 +283,7 @@ function ChatInterface({
             <div className="w-full max-w-3xl">
               <ChatInput
                 status={status}
-                onSubmit={text =>
-                  sendMessage({ text }, { body: { id: chatId, autoApprove: autoApproveAfter } })
-                }
+                onSubmit={handleSendMessage}
                 stop={stop}
                 isCentered={true}
               />
@@ -298,6 +337,18 @@ function ChatInterface({
                                       </div>
                                   );
                               
+                              case 'tool-create_ppt_plan': {
+                                   const p = part as any;
+                                   return <ToolView key={index} invocation={{ 
+                                       toolName: 'create_ppt_plan', 
+                                     args: p.args || p.toolInvocation?.args || p.input || p.toolInvocation?.input, 
+                                     result: p.result || p.toolInvocation?.result || p.output || p.toolInvocation?.output,
+                                       state: p.state || p.toolInvocation?.state,
+                                       toolCallId: p.toolCallId || p.toolInvocation?.toolCallId || 'unknown',
+                                       approval: p.approval || p.toolInvocation?.approval
+                                   }} />;
+                              }
+                              
                               case 'tool-create_subagent': {
                                    const p = part as any;
                                    return <ToolView key={index} invocation={{ 
@@ -318,11 +369,7 @@ function ChatInterface({
                                        state: p.state || p.toolInvocation?.state,
                                        toolCallId: p.toolCallId || p.toolInvocation?.toolCallId || 'unknown',
                                        approval: p.approval || p.toolInvocation?.approval
-                                   }}
-                                   onApprove={id => submitApproval(id, true)}
-                                   onReject={(id, reason) => submitApproval(id, false, reason)}
-                                   onAutoApproveAfter={id => submitApproval(id, true, undefined, true)}
-                                   />;
+                                   }} />;
                               }
 
                               case 'tool-assign_task': {
@@ -359,13 +406,16 @@ function ChatInterface({
               </div>
             </div>
 
+            <PPTPlanPreview
+              pptPlan={pptPlan}
+              onUpdate={handlePptPlanUpdate}
+            />
+
             <div className="border-t border-gray-200 bg-gray-50">
               <div className="w-full max-w-3xl mx-auto px-4 py-4">
                 <ChatInput
                   status={status}
-                  onSubmit={text =>
-                    sendMessage({ text }, { body: { id: chatId, autoApprove: autoApproveAfter } })
-                  }
+                  onSubmit={handleSendMessage}
                   stop={stop}
                   isCentered={false}
                 />
@@ -396,17 +446,21 @@ export default function ChatPage() {
     loadChats();
   }, [loadChats]);
 
+  const [currentPptPlan, setCurrentPptPlan] = useState<{ slides: Slide[] } | undefined>();
+
   const handleSelectChat = async (id: string) => {
     // If selecting same chat, do nothing (optional optimization)
     if (id === currentChatId) return;
 
     // Reset messages first to avoid flash of old content
     setInitialMessages([]); 
+    setCurrentPptPlan(undefined);
     setCurrentChatId(id);
 
     const chat = await fetchChat(id);
     if (chat) {
       setInitialMessages(chat.messages || []);
+      setCurrentPptPlan(chat.pptPlan);
     }
   };
 
@@ -414,6 +468,7 @@ export default function ChatPage() {
     const newId = uuidv4();
     setCurrentChatId(newId);
     setInitialMessages([]);
+    setCurrentPptPlan(undefined);
   };
 
   const handleDeleteChat = async (id: string) => {
@@ -465,6 +520,7 @@ export default function ChatPage() {
                 key={currentChatId}
                 chatId={currentChatId}
                 initialMessages={initialMessages}
+                initialPptPlan={currentPptPlan}
                 onChatUpdate={handleChatUpdate}
             />
         ) : (
