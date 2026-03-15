@@ -51,7 +51,7 @@ export function initDb() {
       role TEXT,
       content TEXT,
       emotion TEXT,
-      speed REAL,
+      speed TEXT,
       idx INTEGER,
       audio_path TEXT,
       created_at INTEGER,

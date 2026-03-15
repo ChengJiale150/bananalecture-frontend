@@ -9,12 +9,13 @@ import type { Slide, SlideType } from '@/lib/chat-store';
 import { moveSlideUp, moveSlideDown } from '@/lib/chat-store';
 
 interface PPTPlanModalProps {
+  chatId: string;
   pptPlan: { slides: Slide[] };
   onUpdate: (plan: { slides: Slide[] }) => void;
   onClose: () => void;
 }
 
-export default function PPTPlanModal({ pptPlan, onUpdate, onClose }: PPTPlanModalProps) {
+export default function PPTPlanModal({ chatId, pptPlan, onUpdate, onClose }: PPTPlanModalProps) {
   const router = useRouter();
   const [slides, setSlides] = useState<Slide[]>(pptPlan.slides);
   const [editingSlideIndex, setEditingSlideIndex] = useState<number | null>(null);
@@ -34,9 +35,7 @@ export default function PPTPlanModal({ pptPlan, onUpdate, onClose }: PPTPlanModa
 
   const handleConfirm = () => {
     try {
-      // Use a slightly more robust way to signal that we are navigating
-      // and maybe avoid massive JSON if possible, but for now we keep it
-      sessionStorage.setItem('current_ppt_plan', JSON.stringify({ slides }));
+      sessionStorage.setItem('current_ppt_plan', JSON.stringify({ chatId, slides }));
       router.push('/preview');
     } catch (e) {
       console.error('Failed to save plan', e);

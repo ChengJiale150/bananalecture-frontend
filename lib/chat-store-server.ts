@@ -2,6 +2,44 @@ import db from './db';
 import { ChatRecord, Slide, Dialogue } from './chat-store';
 import { v4 as uuidv4 } from 'uuid';
 
+const roleSet = new Set(['大雄', '哆啦A梦', '旁白', '其他男声', '其他女声', '道具']);
+const emotionSet = new Set(['开心的', '悲伤的', '生气的', '害怕的', '惊讶的', '无明显情感']);
+const speedSet = new Set(['慢速', '中速', '快速']);
+
+function normalizeDialogueRole(value: unknown): Dialogue['role'] {
+  if (typeof value === 'string' && roleSet.has(value)) {
+    return value as Dialogue['role'];
+  }
+  return '旁白';
+}
+
+function normalizeDialogueEmotion(value: unknown): Dialogue['emotion'] {
+  if (typeof value === 'string' && emotionSet.has(value)) {
+    return value as Dialogue['emotion'];
+  }
+  return '无明显情感';
+}
+
+function normalizeDialogueSpeed(value: unknown): Dialogue['speed'] {
+  if (typeof value === 'string' && speedSet.has(value)) {
+    return value as Dialogue['speed'];
+  }
+  if (typeof value === 'number') {
+    if (value <= 0.9) return '慢速';
+    if (value >= 1.2) return '快速';
+    return '中速';
+  }
+  if (typeof value === 'string') {
+    const parsed = Number.parseFloat(value);
+    if (!Number.isNaN(parsed)) {
+      if (parsed <= 0.9) return '慢速';
+      if (parsed >= 1.2) return '快速';
+      return '中速';
+    }
+  }
+  return '中速';
+}
+
 // Helper to parse JSON safely
 function parseJSON<T>(text: string | null, fallback: T): T {
   if (!text) return fallback;
@@ -26,10 +64,10 @@ function getChatSync(id: string): ChatRecord | null {
     
     const dialogues: Dialogue[] = dialoguesRows.map(dRow => ({
       id: dRow.id,
-      role: dRow.role,
+      role: normalizeDialogueRole(dRow.role),
       content: dRow.content,
-      emotion: dRow.emotion,
-      speed: dRow.speed,
+      emotion: normalizeDialogueEmotion(dRow.emotion),
+      speed: normalizeDialogueSpeed(dRow.speed),
       audioPath: dRow.audio_path
     }));
 
@@ -99,7 +137,8 @@ export async function upsertChat(update: Partial<ChatRecord> & { id: string }): 
         db.prepare('DELETE FROM ppt_plans WHERE project_id = ?').run(id);
 
         if (update.pptPlan && update.pptPlan.slides) {
-          insertSlides(id, update.pptPlan.slides, now);
+          const mergedSlides = mergeSlidesWithExistingDialogues(id, update.pptPlan.slides);
+          insertSlides(id, mergedSlides, now);
         }
       }
 
@@ -172,10 +211,10 @@ function insertSlides(projectId: string, slides: Slide[], now: number) {
         insertDialogue.run(
           dId,
           slideId,
-          d.role,
+          normalizeDialogueRole(d.role),
           d.content,
-          d.emotion || null,
-          d.speed || 1.0,
+          normalizeDialogueEmotion(d.emotion),
+          normalizeDialogueSpeed(d.speed),
           dIdx,
           d.audioPath || null,
           now,
@@ -183,6 +222,39 @@ function insertSlides(projectId: string, slides: Slide[], now: number) {
         );
       });
     }
+  });
+}
+
+function mergeSlidesWithExistingDialogues(projectId: string, slides: Slide[]) {
+  const existingSlides = getChatSync(projectId)?.pptPlan?.slides || [];
+  if (existingSlides.length === 0) {
+    return slides;
+  }
+
+  const existingById = new Map(existingSlides.map(slide => [slide.id, slide]));
+
+  return slides.map((slide, idx) => {
+    if (slide.dialogues && slide.dialogues.length > 0) {
+      return slide;
+    }
+
+    const matchedById = slide.id ? existingById.get(slide.id) : undefined;
+    if (matchedById?.dialogues && matchedById.dialogues.length > 0) {
+      return {
+        ...slide,
+        dialogues: matchedById.dialogues,
+      };
+    }
+
+    const matchedByIndex = existingSlides[idx];
+    if (matchedByIndex?.dialogues && matchedByIndex.dialogues.length > 0) {
+      return {
+        ...slide,
+        dialogues: matchedByIndex.dialogues,
+      };
+    }
+
+    return slide;
   });
 }
 
@@ -226,7 +298,8 @@ export async function mutateChat<T>(
          if (next.pptPlan) {
             db.prepare('DELETE FROM ppt_plans WHERE project_id = ?').run(id);
             if (next.pptPlan.slides) {
-              insertSlides(id, next.pptPlan.slides, now);
+              const mergedSlides = mergeSlidesWithExistingDialogues(id, next.pptPlan.slides);
+              insertSlides(id, mergedSlides, now);
             }
          }
        } else {
@@ -254,6 +327,70 @@ export async function mutateChat<T>(
   });
 
   return transaction();
+}
+
+export async function replaceSlideDialogues(
+  chatId: string,
+  payload: { slideId?: string; slideIndex?: number; dialogues: Omit<Dialogue, 'id'>[] },
+) {
+  const transaction = db.transaction(() => {
+    const now = Date.now();
+    const existing = db.prepare('SELECT * FROM projects WHERE id = ?').get(chatId) as any;
+
+    if (!existing) {
+      return null;
+    }
+    db.prepare(`
+      UPDATE projects
+      SET updated_at = ?
+      WHERE id = ?
+    `).run(now, chatId);
+
+    let targetPlan = null as any;
+    if (payload.slideId) {
+      targetPlan = db
+        .prepare('SELECT * FROM ppt_plans WHERE project_id = ? AND id = ?')
+        .get(chatId, payload.slideId) as any;
+    }
+    if (!targetPlan && typeof payload.slideIndex === 'number') {
+      targetPlan = db
+        .prepare('SELECT * FROM ppt_plans WHERE project_id = ? ORDER BY idx ASC LIMIT 1 OFFSET ?')
+        .get(chatId, payload.slideIndex) as any;
+    }
+    if (!targetPlan) {
+      return null;
+    }
+
+    db.prepare('DELETE FROM dialogues WHERE plan_id = ?').run(targetPlan.id);
+
+    const insertDialogue = db.prepare(`
+      INSERT INTO dialogues (id, plan_id, role, content, emotion, speed, idx, audio_path, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    payload.dialogues.forEach((d, dIdx) => {
+      insertDialogue.run(
+        uuidv4(),
+        targetPlan.id,
+        normalizeDialogueRole(d.role),
+        d.content,
+        normalizeDialogueEmotion(d.emotion),
+        normalizeDialogueSpeed(d.speed),
+        dIdx,
+        d.audioPath || null,
+        now,
+        now,
+      );
+    });
+
+    return targetPlan.id as string;
+  });
+
+  const targetSlideId = transaction();
+  if (!targetSlideId) {
+    return null;
+  }
+  return getChatSync(chatId);
 }
 
 export async function deleteChat(id: string) {

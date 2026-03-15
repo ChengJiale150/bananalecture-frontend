@@ -219,16 +219,21 @@ function ChatInterface({
 
           if (type === 'tool-create_ppt_plan') {
             const args = part?.args || part?.toolInvocation?.args || part?.input || part?.toolInvocation?.input;
-            const slides = args?.slides;
+            const output = part?.output || part?.toolInvocation?.output;
+            const slides = output?.pptPlan?.slides || output?.slides || args?.slides;
             if (!Array.isArray(slides)) continue;
 
-            const slidesWithId = slides.map((s: any) => ({
+            const slidesWithId = slides.map((s: any, idx: number) => ({
               ...s,
-              id: s.id || uuidv4(),
+              id: s.id || pptPlan?.slides?.[idx]?.id || uuidv4(),
+              dialogues: s.dialogues ?? pptPlan?.slides?.[idx]?.dialogues,
             }));
 
             processedToolCallIds.current.add(toolCallId);
             const nextPptPlan = { slides: slidesWithId };
+            if (JSON.stringify(nextPptPlan.slides) === JSON.stringify(pptPlan?.slides || [])) {
+              continue;
+            }
             setPptPlan(nextPptPlan);
             await saveChatToApi({ id: chatId, pptPlan: nextPptPlan });
             onChatUpdate({ id: chatId, pptPlan: nextPptPlan });
@@ -238,7 +243,7 @@ function ChatInterface({
     };
     
     void processMessages();
-  }, [messages, chatId, onChatUpdate]);
+  }, [messages, chatId, onChatUpdate, pptPlan]);
 
   return (
     <div className="flex flex-col lg:flex-row h-screen bg-[#F0F8FF]">
@@ -343,6 +348,7 @@ function ChatInterface({
             </div>
 
             <PPTPlanPreview
+              chatId={chatId}
               pptPlan={pptPlan}
               onUpdate={handlePptPlanUpdate}
             />
