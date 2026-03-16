@@ -51,7 +51,7 @@ function parseJSON<T>(text: string | null, fallback: T): T {
 }
 
 // Helper to reconstruct ChatRecord from DB rows
-function getChatSync(id: string): ChatRecord | null {
+function getChatSync(id: string, includeDialogues: boolean = false): ChatRecord | null {
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as any;
   if (!project) return null;
 
@@ -59,17 +59,19 @@ function getChatSync(id: string): ChatRecord | null {
   const slidesRows = db.prepare('SELECT * FROM ppt_plans WHERE project_id = ? ORDER BY idx ASC').all(id) as any[];
   
   const slides: Slide[] = slidesRows.map(row => {
-    // Get dialogues for this slide
-    const dialoguesRows = db.prepare('SELECT * FROM dialogues WHERE plan_id = ? ORDER BY idx ASC').all(row.id) as any[];
-    
-    const dialogues: Dialogue[] = dialoguesRows.map(dRow => ({
-      id: dRow.id,
-      role: normalizeDialogueRole(dRow.role),
-      content: dRow.content,
-      emotion: normalizeDialogueEmotion(dRow.emotion),
-      speed: normalizeDialogueSpeed(dRow.speed),
-      audioPath: dRow.audio_path
-    }));
+    let dialogues: Dialogue[] | undefined = undefined;
+
+    if (includeDialogues) {
+      const dialoguesRows = db.prepare('SELECT * FROM dialogues WHERE plan_id = ? ORDER BY idx ASC').all(row.id) as any[];
+      dialogues = dialoguesRows.map(dRow => ({
+        id: dRow.id,
+        role: normalizeDialogueRole(dRow.role),
+        content: dRow.content,
+        emotion: normalizeDialogueEmotion(dRow.emotion),
+        speed: normalizeDialogueSpeed(dRow.speed),
+        audioPath: dRow.audio_path
+      }));
+    }
 
     return {
       id: row.id,
@@ -110,15 +112,27 @@ export async function getAllChats(): Promise<ChatRecord[]> {
 }
 
 export async function getChat(id: string): Promise<ChatRecord | null> {
-  return getChatSync(id);
+  return getChatSync(id); // default includeDialogues = false
+}
+
+export async function getSlideDialogues(slideId: string): Promise<Dialogue[]> {
+  const dialoguesRows = db.prepare('SELECT * FROM dialogues WHERE plan_id = ? ORDER BY idx ASC').all(slideId) as any[];
+  return dialoguesRows.map(dRow => ({
+    id: dRow.id,
+    role: normalizeDialogueRole(dRow.role),
+    content: dRow.content,
+    emotion: normalizeDialogueEmotion(dRow.emotion),
+    speed: normalizeDialogueSpeed(dRow.speed),
+    audioPath: dRow.audio_path
+  }));
 }
 
 export async function upsertChat(update: Partial<ChatRecord> & { id: string }): Promise<ChatRecord> {
-  const { id } = update;
+  const { id: projectId } = update;
   const now = Date.now();
 
   const transaction = db.transaction(() => {
-    const existing = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as any;
+    const existing = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
 
     if (existing) {
       // Update
@@ -130,24 +144,22 @@ export async function upsertChat(update: Partial<ChatRecord> & { id: string }): 
         UPDATE projects 
         SET name = ?, messages = ?, video_path = ?, updated_at = ?
         WHERE id = ?
-      `).run(newTitle, newMessages, newVideoPath, now, id);
+      `).run(newTitle, newMessages, newVideoPath, now, projectId);
 
       if ('pptPlan' in update) {
-        // Replace plans
-        db.prepare('DELETE FROM ppt_plans WHERE project_id = ?').run(id);
-
         if (update.pptPlan && update.pptPlan.slides) {
-          const mergedSlides = mergeSlidesWithExistingDialogues(id, update.pptPlan.slides);
-          insertSlides(id, mergedSlides, now);
+          syncSlides(projectId, update.pptPlan.slides, now);
+        } else {
+          db.prepare('DELETE FROM ppt_plans WHERE project_id = ?').run(projectId);
         }
       }
 
     } else {
       // Insert
-      const title = update.title || 'New Chat';
-      // If title is 'New Chat', try to extract from messages like before
+      const title = update.title || 'New Project';
+      // If title is 'New Project', try to extract from messages like before
       let finalTitle = title;
-      if (finalTitle === 'New Chat' && update.messages && update.messages.length > 0) {
+      if (finalTitle === 'New Project' && update.messages && update.messages.length > 0) {
          const firstText = (update.messages[0] as any)?.content || (update.messages[0] as any)?.parts?.find((p: any) => p.type === 'text')?.text;
          if (typeof firstText === 'string' && firstText.trim()) {
             finalTitle = firstText.slice(0, 30);
@@ -158,7 +170,7 @@ export async function upsertChat(update: Partial<ChatRecord> & { id: string }): 
         INSERT INTO projects (id, user_id, name, messages, video_path, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `).run(
-        id,
+        projectId,
         update.userId || 'admin',
         finalTitle,
         JSON.stringify(update.messages || []),
@@ -168,14 +180,91 @@ export async function upsertChat(update: Partial<ChatRecord> & { id: string }): 
       );
 
       if (update.pptPlan && update.pptPlan.slides) {
-        insertSlides(id, update.pptPlan.slides, now);
+        insertSlides(projectId, update.pptPlan.slides, now);
       }
     }
 
-    return getChatSync(id)!;
+    return getChatSync(projectId)!;
   });
 
   return transaction();
+}
+
+function syncSlides(projectId: string, slides: Slide[], now: number) {
+  const existingRows = db.prepare('SELECT id FROM ppt_plans WHERE project_id = ?').all(projectId) as {id: string}[];
+  const existingIds = new Set(existingRows.map(r => r.id));
+  const newIds = new Set(slides.map(s => s.id).filter(Boolean));
+
+  for (const id of existingIds) {
+    if (!newIds.has(id)) {
+      db.prepare('DELETE FROM ppt_plans WHERE id = ?').run(id);
+    }
+  }
+
+  const insertPlan = db.prepare(`
+    INSERT INTO ppt_plans (id, project_id, type, title, description, content, idx, image_path, audio_path, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const updatePlan = db.prepare(`
+    UPDATE ppt_plans
+    SET type = ?, title = ?, description = ?, content = ?, idx = ?, image_path = ?, audio_path = ?, updated_at = ?
+    WHERE id = ?
+  `);
+
+  const insertDialogue = db.prepare(`
+    INSERT INTO dialogues (id, plan_id, role, content, emotion, speed, idx, audio_path, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  slides.forEach((slide, idx) => {
+    const slideId = slide.id || uuidv4();
+    if (existingIds.has(slideId)) {
+      updatePlan.run(
+        slide.type,
+        slide.title,
+        slide.description,
+        slide.content || '',
+        idx,
+        slide.imagePath || null,
+        slide.audioPath || null,
+        now,
+        slideId
+      );
+    } else {
+      insertPlan.run(
+        slideId,
+        projectId,
+        slide.type,
+        slide.title,
+        slide.description,
+        slide.content || '',
+        idx,
+        slide.imagePath || null,
+        slide.audioPath || null,
+        now,
+        now
+      );
+
+      if (slide.dialogues && slide.dialogues.length > 0) {
+        slide.dialogues.forEach((d, dIdx) => {
+          const dId = d.id || uuidv4();
+          insertDialogue.run(
+            dId,
+            slideId,
+            normalizeDialogueRole(d.role),
+            d.content,
+            normalizeDialogueEmotion(d.emotion),
+            normalizeDialogueSpeed(d.speed),
+            dIdx,
+            d.audioPath || null,
+            now,
+            now
+          );
+        });
+      }
+    }
+  });
 }
 
 function insertSlides(projectId: string, slides: Slide[], now: number) {
@@ -225,52 +314,19 @@ function insertSlides(projectId: string, slides: Slide[], now: number) {
   });
 }
 
-function mergeSlidesWithExistingDialogues(projectId: string, slides: Slide[]) {
-  const existingSlides = getChatSync(projectId)?.pptPlan?.slides || [];
-  if (existingSlides.length === 0) {
-    return slides;
-  }
-
-  const existingById = new Map(existingSlides.map(slide => [slide.id, slide]));
-
-  return slides.map((slide, idx) => {
-    if (slide.dialogues && slide.dialogues.length > 0) {
-      return slide;
-    }
-
-    const matchedById = slide.id ? existingById.get(slide.id) : undefined;
-    if (matchedById?.dialogues && matchedById.dialogues.length > 0) {
-      return {
-        ...slide,
-        dialogues: matchedById.dialogues,
-      };
-    }
-
-    const matchedByIndex = existingSlides[idx];
-    if (matchedByIndex?.dialogues && matchedByIndex.dialogues.length > 0) {
-      return {
-        ...slide,
-        dialogues: matchedByIndex.dialogues,
-      };
-    }
-
-    return slide;
-  });
-}
-
 export async function mutateChat<T>(
-  id: string,
+  projectId: string,
   mutator: (chat: ChatRecord) => { result: T; chat?: ChatRecord },
 ): Promise<T> {
   // Use transaction to ensure atomicity
   const transaction = db.transaction(() => {
-    const existing = getChatSync(id);
+    const existing = getChatSync(projectId);
     const now = Date.now();
     
     const chatToMutate = existing || {
-      id,
+      id: projectId,
       userId: 'admin',
-      title: 'New Chat',
+      title: 'New Project',
       createdAt: now,
       updatedAt: now,
       messages: [],
@@ -279,7 +335,7 @@ export async function mutateChat<T>(
     const { result, chat: next } = mutator(chatToMutate);
 
     if (next) {
-       const existingRecord = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as any;
+       const existingRecord = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as any;
        
        if (existingRecord) {
          // Update
@@ -292,14 +348,14 @@ export async function mutateChat<T>(
             JSON.stringify(next.messages), 
             next.videoPath || null,
             now,
-            id
+            projectId
          );
          
          if (next.pptPlan) {
-            db.prepare('DELETE FROM ppt_plans WHERE project_id = ?').run(id);
             if (next.pptPlan.slides) {
-              const mergedSlides = mergeSlidesWithExistingDialogues(id, next.pptPlan.slides);
-              insertSlides(id, mergedSlides, now);
+              syncSlides(projectId, next.pptPlan.slides, now);
+            } else {
+              db.prepare('DELETE FROM ppt_plans WHERE project_id = ?').run(projectId);
             }
          }
        } else {
@@ -308,7 +364,7 @@ export async function mutateChat<T>(
             INSERT INTO projects (id, user_id, name, messages, video_path, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
           `).run(
-            id,
+            projectId,
             next.userId || 'admin',
             next.title,
             JSON.stringify(next.messages || []),
@@ -318,7 +374,7 @@ export async function mutateChat<T>(
           );
 
           if (next.pptPlan && next.pptPlan.slides) {
-            insertSlides(id, next.pptPlan.slides, now);
+            insertSlides(projectId, next.pptPlan.slides, now);
           }
        }
     }
@@ -329,68 +385,70 @@ export async function mutateChat<T>(
   return transaction();
 }
 
+export async function clearSlideDialogues(slideId: string): Promise<boolean> {
+  try {
+    const result = db.prepare('DELETE FROM dialogues WHERE plan_id = ?').run(slideId);
+    return result.changes >= 0;
+  } catch (error) {
+    console.error('Failed to clear slide dialogues:', error);
+    return false;
+  }
+}
+
 export async function replaceSlideDialogues(
-  chatId: string,
-  payload: { slideId?: string; slideIndex?: number; dialogues: Omit<Dialogue, 'id'>[] },
-) {
-  const transaction = db.transaction(() => {
+  projectId: string,
+  target: { slideId?: string; slideIndex?: number; dialogues: Dialogue[] },
+): Promise<ChatRecord | null> {
+  const runTransaction = db.transaction(() => {
     const now = Date.now();
-    const existing = db.prepare('SELECT * FROM projects WHERE id = ?').get(chatId) as any;
+    
+    // 1. Validate project exists
+    const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(projectId);
+    if (!project) return null;
 
-    if (!existing) {
-      return null;
-    }
-    db.prepare(`
-      UPDATE projects
-      SET updated_at = ?
-      WHERE id = ?
-    `).run(now, chatId);
-
-    let targetPlan = null as any;
-    if (payload.slideId) {
-      targetPlan = db
-        .prepare('SELECT * FROM ppt_plans WHERE project_id = ? AND id = ?')
-        .get(chatId, payload.slideId) as any;
-    }
-    if (!targetPlan && typeof payload.slideIndex === 'number') {
-      targetPlan = db
-        .prepare('SELECT * FROM ppt_plans WHERE project_id = ? ORDER BY idx ASC LIMIT 1 OFFSET ?')
-        .get(chatId, payload.slideIndex) as any;
-    }
-    if (!targetPlan) {
-      return null;
+    // 2. Find target slide
+    let targetSlideId = target.slideId;
+    
+    if (!targetSlideId && typeof target.slideIndex === 'number') {
+       const slide = db.prepare('SELECT id FROM ppt_plans WHERE project_id = ? ORDER BY idx ASC LIMIT 1 OFFSET ?').get(projectId, target.slideIndex) as {id: string};
+       if (slide) targetSlideId = slide.id;
     }
 
-    db.prepare('DELETE FROM dialogues WHERE plan_id = ?').run(targetPlan.id);
+    if (!targetSlideId) return null;
 
+    // 3. Clear existing dialogues for this slide
+    // IMPORTANT: We must clear before inserting to avoid duplication or conflicts
+    db.prepare('DELETE FROM dialogues WHERE plan_id = ?').run(targetSlideId);
+
+    // 4. Insert new dialogues
     const insertDialogue = db.prepare(`
       INSERT INTO dialogues (id, plan_id, role, content, emotion, speed, idx, audio_path, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    payload.dialogues.forEach((d, dIdx) => {
+    target.dialogues.forEach((d, idx) => {
       insertDialogue.run(
-        uuidv4(),
-        targetPlan.id,
+        d.id || uuidv4(),
+        targetSlideId,
         normalizeDialogueRole(d.role),
         d.content,
         normalizeDialogueEmotion(d.emotion),
         normalizeDialogueSpeed(d.speed),
-        dIdx,
+        idx,
         d.audioPath || null,
         now,
-        now,
+        now
       );
     });
 
-    return targetPlan.id as string;
+    // 5. Update project timestamp
+    db.prepare('UPDATE projects SET updated_at = ? WHERE id = ?').run(now, projectId);
+
+    return projectId;
   });
 
-  const targetSlideId = transaction();
-  if (!targetSlideId) {
-    return null;
-  }
-  return getChatSync(chatId);
+  const result = runTransaction();
+  return result ? getChatSync(projectId) : null;
 }
 
 export async function deleteChat(id: string) {

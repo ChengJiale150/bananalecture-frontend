@@ -8,7 +8,7 @@ export const SlideSchema = z.object({
   type: z.enum(['cover', 'introduction', 'content', 'summary', 'ending']).describe('Type of the slide'),
   title: z.string().describe('Title of the slide'),
   description: z.string().describe('Brief description of what this slide is about'),
-  content: z.string().optional().describe('Detailed content for the slide'),
+  content: z.string().optional().describe('Detailed image generation prompt for the slide. Must follow the pattern: Subject + Action + Environment + Style/Color/Lighting. Text to be rendered should be in double quotes.'),
 });
 
 export type SlideType = z.infer<typeof SlideSchema>['type'];

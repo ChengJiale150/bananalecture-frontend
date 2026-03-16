@@ -2,6 +2,7 @@ import { createDialogueTools } from '@/agent/dialogue/tools';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { ToolLoopAgent, InferAgentUIMessage, hasToolCall } from 'ai';
 import type { PPTPlan, Slide, Dialogue } from '@/lib/chat-store';
+import { type } from 'os';
 
 const kimiClient = createOpenAICompatible({
   name: 'kimi',
@@ -83,6 +84,11 @@ export function createDialogueAgent(chatId: string, options?: DialogueAgentOptio
     instructions: buildSystemPrompt(options),
     tools: createDialogueTools(chatId),
     stopWhen: hasToolCall('create_dialogue_script'),
+    providerOptions: {
+      kimi: {
+        thinking: { type: 'disabled' },
+      },
+    },
     experimental_context: {
       autoApprove: options?.autoApprove,
       pptPlan: options?.pptPlan,

@@ -114,6 +114,15 @@ function ChatInterface({
     return { slides: validSlides };
   });
 
+  useEffect(() => {
+    if (!initialPptPlan?.slides) {
+      setPptPlan(undefined);
+      return;
+    }
+    const validSlides = initialPptPlan.slides.filter(s => s && Object.keys(s).length > 0 && s.type);
+    setPptPlan(validSlides.length > 0 ? { slides: validSlides } : undefined);
+  }, [initialPptPlan]);
+
   const processedToolCallIds = useRef<Set<string>>(new Set());
   const processedApprovalIds = useRef<Set<string>>(new Set());
   const prevStatusRef = useRef(status);
@@ -223,17 +232,24 @@ function ChatInterface({
             const slides = output?.pptPlan?.slides || output?.slides || args?.slides;
             if (!Array.isArray(slides)) continue;
 
-            const slidesWithId = slides.map((s: any, idx: number) => ({
-              ...s,
-              id: s.id || pptPlan?.slides?.[idx]?.id || uuidv4(),
-              dialogues: s.dialogues ?? pptPlan?.slides?.[idx]?.dialogues,
-            }));
+            const slidesWithId = slides.map((s: any, idx: number) => {
+              // Preserve existing IDs if we already have a plan to avoid wiping out dialogues
+              const existingSlide = pptPlan?.slides?.[idx];
+              return {
+                ...s,
+                id: s.id || existingSlide?.id || uuidv4(),
+                dialogues: s.dialogues || existingSlide?.dialogues || [], 
+              };
+            });
 
             processedToolCallIds.current.add(toolCallId);
             const nextPptPlan = { slides: slidesWithId };
+            
+            // Only update if something actually changed to avoid infinite save loops
             if (JSON.stringify(nextPptPlan.slides) === JSON.stringify(pptPlan?.slides || [])) {
               continue;
             }
+            
             setPptPlan(nextPptPlan);
             await saveChatToApi({ id: chatId, pptPlan: nextPptPlan });
             onChatUpdate({ id: chatId, pptPlan: nextPptPlan });
@@ -348,7 +364,7 @@ function ChatInterface({
             </div>
 
             <PPTPlanPreview
-              chatId={chatId}
+              projectId={chatId}
               pptPlan={pptPlan}
               onUpdate={handlePptPlanUpdate}
             />

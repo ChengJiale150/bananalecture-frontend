@@ -22,13 +22,16 @@ export function createDialogueTools(chatId: string) {
       dialogues: z.array(DialogueSchema).min(1).describe('当前页完整口播稿对话'),
     }),
     async execute({ slideId, slideIndex, dialogues }) {
+      console.log(`[Tool] create_dialogue_script called for slide ${slideId || slideIndex}`);
+      
       const saved = await replaceSlideDialogues(chatId, {
         slideId,
         slideIndex,
-        dialogues,
+        dialogues: dialogues as any,
       });
 
       if (!saved) {
+        console.error(`[Tool] Failed to save dialogues for slide ${slideId || slideIndex}`);
         return {
           result: '未找到目标页，口播稿保存失败。',
           slideId,
@@ -37,6 +40,7 @@ export function createDialogueTools(chatId: string) {
         };
       }
 
+      console.log(`[Tool] Successfully saved dialogues for slide ${slideId || slideIndex}`);
       return {
         result: '口播稿生成并保存成功！',
         slideId,
