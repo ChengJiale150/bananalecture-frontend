@@ -120,12 +120,40 @@ export function DialogueList({ dialogues, isSaving, onSave }: DialogueListProps)
                       </option>
                     ))}
                   </select>
-                  <span className="text-xs text-gray-600 bg-gray-100 px-2 py-1 rounded-full border border-gray-200">
-                    {emotion.emoji} {emotion.label}
-                  </span>
-                  <span className={`text-xs px-2 py-1 rounded-full border ${speed.className}`}>
-                    {speed.label}
-                  </span>
+                  <div className="relative cursor-pointer hover:brightness-95 transition-all">
+                    <span className="text-xs text-gray-600 bg-gray-100 px-2 py-1 rounded-full border border-gray-200 flex items-center gap-1">
+                      {emotion.emoji} {emotion.label}
+                    </span>
+                    <select
+                      value={dialogue.emotion || '无明显情感'}
+                      onChange={(e) => updateItem(index, { emotion: e.target.value as Dialogue['emotion'] })}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                      title="点击修改情感"
+                    >
+                      {DIALOGUE_EMOTIONS.map((item) => (
+                        <option key={item} value={item}>
+                          {getEmotionDisplay(item).emoji} {item}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="relative cursor-pointer hover:brightness-95 transition-all">
+                    <span className={`text-xs px-2 py-1 rounded-full border ${speed.className} flex items-center gap-1`}>
+                      {speed.label}
+                    </span>
+                    <select
+                      value={dialogue.speed || '中速'}
+                      onChange={(e) => updateItem(index, { speed: e.target.value as Dialogue['speed'] })}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                      title="点击修改语速"
+                    >
+                      {DIALOGUE_SPEEDS.map((item) => (
+                        <option key={item} value={item}>
+                          {item}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                   <button className="p-1 text-[var(--doraemon-blue)] hover:bg-blue-50 rounded-full transition-colors" title="播放音频">
                     <Play size={14} />
                   </button>
@@ -153,30 +181,6 @@ export function DialogueList({ dialogues, isSaving, onSave }: DialogueListProps)
                     <Trash2 size={16} />
                   </button>
                 </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2 mb-3">
-                <select
-                  value={dialogue.emotion || '无明显情感'}
-                  onChange={(e) => updateItem(index, { emotion: e.target.value as Dialogue['emotion'] })}
-                  className="text-xs border border-gray-300 rounded-lg px-2 py-1"
-                >
-                  {DIALOGUE_EMOTIONS.map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={dialogue.speed || '中速'}
-                  onChange={(e) => updateItem(index, { speed: e.target.value as Dialogue['speed'] })}
-                  className="text-xs border border-gray-300 rounded-lg px-2 py-1"
-                >
-                  {DIALOGUE_SPEEDS.map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
-                </select>
               </div>
               <textarea
                 value={dialogue.content}
