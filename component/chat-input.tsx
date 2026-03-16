@@ -21,7 +21,7 @@ export default function ChatInput({
   const [text, setText] = useState('');
   const [pageCount, setPageCount] = useState('5-10');
   const [audience, setAudience] = useState('beginner');
-  const [style, setStyle] = useState('doraemon');
+  const [style, setStyle] = useState('multi_panel');
   
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -107,7 +107,9 @@ export default function ChatInput({
                 onChange={(e) => setStyle(e.target.value)}
                 className={`${selectClassName} pl-9`}
               >
-                <option value="doraemon">哆啦A梦</option>
+                <option value="multi_panel">多格动漫</option>
+                <option value="colorful_comic">彩色漫画</option>
+                <option value="flat">扁平插画</option>
               </select>
             </div>
           </div>

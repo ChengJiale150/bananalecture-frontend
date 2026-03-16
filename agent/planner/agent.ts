@@ -16,11 +16,118 @@ interface PlannerOptions {
   style?: string;
 }
 
+const STYLE_CONFIG: Record<string, {
+  name: string;
+  role: string;
+  description: string;
+  visualPrompt: string;
+  structure: string;
+}> = {
+  multi_panel: {
+    name: '多格动漫',
+    role: '多格动漫教学漫画规划师',
+    description: '注重叙事节奏的多格漫画风格',
+    visualPrompt: '哆啦A梦和大雄的多格漫画分镜风格，画面分割清晰，人物动作夸张生动，背景细节丰富，具有强烈的动态感',
+    structure: `
+1. **封面页 (cover)**
+   - 标题：醒目的标题
+   - 描述：引人入胜的开场白
+   - 画面描述 (content)：哆啦A梦和大雄的漫画风格封面插图，包含标题文字 "标题内容"
+
+2. **引入页 (introduction)**
+   - 标题：引入主题
+   - 描述：通过多格分镜展示问题场景
+   - 画面描述 (content)：哆啦A梦和大雄的多格分镜，展示角色遇到困难的过程，表情生动夸张
+
+3. **正文页 (content)** - 可以有多页
+   - 标题：知识点标题
+   - 描述：利用分镜逐步拆解知识点
+   - 画面描述 (content)：哆啦A梦和大雄的多格分镜，展示教学过程，每格画面重点突出，包含关键文字说明
+
+4. **总结页 (summary)**
+   - 标题：总结
+   - 描述：回顾关键步骤
+   - 画面描述 (content)：哆啦A梦和大雄的多格分镜，展示知识点回顾，清晰明了
+
+5. **结束页 (ending)**
+   - 标题：结束语
+   - 描述：幽默或温馨的结尾
+   - 画面描述 (content)：哆啦A梦和大雄的多格分镜，展示故事结局，角色互动有趣
+`
+  },
+  colorful_comic: {
+    name: '彩色漫画',
+    role: '彩色漫画教学漫画规划师',
+    description: '色彩丰富饱满的现代漫画风格',
+    visualPrompt: '哆啦A梦和大雄的彩色漫画风格，色彩鲜艳丰富，高饱和度，现代彩色漫画风格，光影效果强烈，构图大胆',
+    structure: `
+1. **封面页 (cover)**
+   - 标题：醒目的标题
+   - 描述：充满视觉冲击力的介绍
+   - 画面描述 (content)：哆啦A梦和大雄的色彩绚丽漫画封面，构图大胆，包含标题文字 "标题内容"
+
+2. **引入页 (introduction)**
+   - 标题：引入主题
+   - 描述：通过色彩和构图营造氛围
+   - 画面描述 (content)：哆啦A梦和大雄的色彩鲜明场景，突出角色的情绪和环境氛围
+
+3. **正文页 (content)** - 可以有多页
+   - 标题：知识点标题
+   - 描述：图文并茂的知识讲解
+   - 画面描述 (content)：哆啦A梦和大雄的色彩丰富教学场景，利用颜色区分重点，画面生动
+
+4. **总结页 (summary)**
+   - 标题：总结
+   - 描述：视觉化的知识梳理
+   - 画面描述 (content)：哆啦A梦和大雄的色彩明快总结图表或插图，重点突出
+
+5. **结束页 (ending)**
+   - 标题：结束语
+   - 描述：令人印象深刻的结尾
+   - 画面描述 (content)：哆啦A梦和大雄的色彩温馨或震撼结尾画面，留下深刻印象
+`
+  },
+  flat: {
+    name: '扁平插画',
+    role: '扁平插画教学漫画规划师',
+    description: '简约现代的扁平化设计风格',
+    visualPrompt: '哆啦A梦和大雄的现代扁平化插画风格(Flat Illustration)，几何图形为主，色彩搭配和谐，无多余细节，抽象而富有寓意',
+    structure: `
+1. **封面页 (cover)**
+   - 标题：醒目的标题
+   - 描述：简洁有力的介绍
+   - 画面描述 (content)：哆啦A梦和大雄的简约扁平化封面设计，几何元素构成，包含标题文字 "标题内容"
+
+2. **引入页 (introduction)**
+   - 标题：引入主题
+   - 描述：用简单的图形表达问题
+   - 画面描述 (content)：哆啦A梦和大雄的扁平化风格场景，用抽象图形代表问题或挑战
+
+3. **正文页 (content)** - 可以有多页
+   - 标题：知识点标题
+   - 描述：逻辑清晰的图形化讲解
+   - 画面描述 (content)：哆啦A梦和大雄的扁平化图解，利用图标和几何形状解释概念，清晰直观
+
+4. **总结页 (summary)**
+   - 标题：总结
+   - 描述：结构化的知识回顾
+   - 画面描述 (content)：哆啦A梦和大雄的扁平化风格思维导图或清单，整洁有序
+
+5. **结束页 (ending)**
+   - 标题：结束语
+   - 描述：简洁的结束语
+   - 画面描述 (content)：哆啦A梦和大雄的简约扁平化结尾画面，色彩柔和
+`
+  }
+};
+
 function buildSystemPrompt(options?: PlannerOptions) {
-  const { pptPlan: existingPlan, pageCount, audience, style } = options || {};
+  const { pptPlan: existingPlan, pageCount, audience, style = 'multi_panel' } = options || {};
+  
+  const currentStyle = STYLE_CONFIG[style] || STYLE_CONFIG['multi_panel'];
 
   let prompt = `
-你是一位出色的哆啦A梦教学漫画规划师！你的任务是根据用户的教学内容，创作出生动有趣的哆啦A梦风格教学漫画PPT规划。
+你是一位出色的${currentStyle.role}！你的任务是根据用户的教学内容，创作出生动有趣的${currentStyle.name}风格教学漫画PPT规划。
 
 # 任务
 收到用户的教学内容后，你需要：
@@ -34,46 +141,18 @@ function buildSystemPrompt(options?: PlannerOptions) {
 1. **用自然语言清晰描述画面**
    - 建议用简洁连贯的自然语言写明 **主体 + 行为 + 环境**
    - 若对画面美学有要求，可用自然语言或短语补充 **风格、色彩、光影、构图** 等美学元素
+   - **风格强调**：必须在每张图片的描述中明确包含以下风格关键词：**${currentStyle.visualPrompt}**
 
-2. **明确应用场景和用途**
-   - 推荐在文本提示中写明图像用途和类型
-
-3. **提高文本渲染准确度**
+2. **提高文本渲染准确度**
    - 建议将要生成的 **文字内容** 放在 **双引号** 中
-
-### 优秀提示词示例
-"冰箱打开的内部视图：上层: 左边放着一盒牛奶，牛奶盒上绘制了三只大小不一的奶牛，在草原上吃草，右边是一个鸡蛋支架，里面放着八个鸡蛋。中层: 一个盘子，里面装着吃剩的烤鸡，烤鸡上插着一个红色的小旗帜，旁边是一个装满草莓的透明保鲜盒，盒子上绘制有菠萝、草莓和橙子的图案。 下层: 蔬菜抽屉里有生菜、胡萝卜和西红柿。冰箱门后面的置物架里放着番茄酱和蛋黄酱。"
+   - **文本强调**：必须在每张图片的描述中明确包含以下文本关键词：**要求所有的对话使用中文而不是日文**
 
 ## 标准PPT结构（必须包含）
-
-1. **封面页 (cover)**
-   - 标题：醒目的标题
-   - 描述：生动有趣的介绍性文字
-   - 画面描述 (content)：哆啦A梦和大雄的可爱插图，包含标题文字 "标题内容"
-
-2. **引入页 (introduction)**
-   - 标题：引入主题
-   - 描述：大雄遇到问题的场景或哆啦A梦拿出道具
-   - 画面描述 (content)：大雄苦恼的表情或哆啦A梦展示道具的特写
-
-3. **正文页 (content)** - 可以有多页
-   - 标题：知识点标题
-   - 描述：深入浅出地讲解知识点，包含对话概要
-   - 画面描述 (content)：具体的教学场景，黑板、道具演示或想象画面，包含关键文字
-
-4. **总结页 (summary)**
-   - 标题：总结
-   - 描述：简洁明了的要点梳理
-   - 画面描述 (content)：大雄的笔记本特写，上面写着重点回顾
-
-5. **结束页 (ending)**
-   - 标题：结束语
-   - 描述：鼓励继续学习的话语
-   - 画面描述 (content)：哆啦A梦和大雄挥手告别，背景温馨
+${currentStyle.structure}
 
 ## 创作风格要求
 - **生动有趣**：充满童趣和幽默感
-- **角色鲜明**：大雄有点迷糊但努力学习，哆啦A梦聪明可靠又乐于助人
+- **风格统一**：确保所有页面都符合 **${currentStyle.name}** 的风格设定
 - **画面感强**：\`content\` 字段必须是画面描述，不是对话脚本
 `;
 
@@ -93,10 +172,8 @@ function buildSystemPrompt(options?: PlannerOptions) {
     prompt += `\n- **目标受众**：${audienceText}。\n`;
   }
   
-  if (style && style !== 'doraemon') {
-      // Future proofing for other styles if needed, though currently only doraemon is supported fully in prompt text
-      prompt += `\n- **风格要求**：${style}风格。\n`;
-  }
+  // Explicitly reiterate the style requirement
+  prompt += `\n- **风格要求**：${currentStyle.visualPrompt}。\n`;
 
   if (existingPlan && existingPlan.slides && existingPlan.slides.length > 0) {
     prompt += `
@@ -121,7 +198,7 @@ ${slide.content ? `**画面描述**: ${slide.content}` : ''}
   } else {
     prompt += `
 
-现在，根据用户的输入，创建一个精彩的哆啦A梦教学漫画PPT规划吧！
+现在，根据用户的输入，创建一个精彩的${currentStyle.name}教学漫画PPT规划吧！
 `;
   }
 
