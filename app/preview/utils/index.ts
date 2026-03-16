@@ -6,7 +6,7 @@ export interface StoredPreviewPlan {
 }
 
 export async function fetchChat(id: string) {
-  const res = await fetch(`/api/history?id=${id}`);
+  const res = await fetch(`/api/history?id=${id}`, { cache: 'no-store' });
   if (!res.ok) return null;
   return res.json();
 }

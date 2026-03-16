@@ -12,6 +12,7 @@ import { Loader2, BrainCircuit, ChevronDown, ChevronRight } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { useRouter } from 'next/navigation';
 
 // --- Types ---
 
@@ -30,7 +31,7 @@ async function fetchChats(): Promise<ChatSession[]> {
 }
 
 async function fetchChat(id: string) {
-  const res = await fetch(`/api/history?id=${id}`);
+  const res = await fetch(`/api/history?id=${id}`, { cache: 'no-store' });
   if (!res.ok) return null;
   return res.json();
 }
@@ -96,6 +97,7 @@ function ChatInterface({
   initialPptPlan?: { slides: Slide[] };
   onChatUpdate: (chat: any) => void;
 }) {
+  const router = useRouter();
   const { status, sendMessage, messages, stop, setMessages, addToolApprovalResponse } =
     useChat<PlannerAgentUIMessage>({
     id: chatId,
@@ -103,6 +105,22 @@ function ChatInterface({
 
   useEffect(() => {
     setMessages(initialMessages);
+    const restoredToolCallIds = new Set<string>();
+    initialMessages.forEach((message: any) => {
+      const parts = message?.parts;
+      if (!Array.isArray(parts)) return;
+      parts.forEach((part: any) => {
+        const partType = part?.type;
+        if (partType !== 'tool-create_ppt_plan') return;
+        const toolCallId =
+          part?.toolCallId || part?.toolInvocation?.toolCallId || part?.toolInvocation?.toolCallID;
+        if (typeof toolCallId === 'string' && toolCallId) {
+          restoredToolCallIds.add(toolCallId);
+        }
+      });
+    });
+    processedToolCallIds.current = restoredToolCallIds;
+    hasInitializedToolCallsRef.current = true;
   }, [initialMessages, setMessages]); // Added dependencies
 
   const [autoApproveAfter, setAutoApproveAfter] = useState(false);
@@ -126,6 +144,7 @@ function ChatInterface({
   const processedToolCallIds = useRef<Set<string>>(new Set());
   const processedApprovalIds = useRef<Set<string>>(new Set());
   const prevStatusRef = useRef(status);
+  const hasInitializedToolCallsRef = useRef(false);
 
   const submitApproval = useCallback(
     (approvalId: string, approved: boolean, reason?: string, enableAutoApprove?: boolean) => {
@@ -213,7 +232,17 @@ function ChatInterface({
     sendMessage({ text }, { body });
   }, [chatId, autoApproveAfter, pptPlan, sendMessage]);
 
+  const handleOpenPreview = useCallback(async () => {
+    try {
+      await fetch(`/api/history?id=${chatId}`, { cache: 'no-store' });
+    } catch (error) {
+      console.error('Failed to refresh project before preview:', error);
+    }
+    router.push(`/preview?id=${chatId}&refresh=${Date.now()}`);
+  }, [chatId, router]);
+
   useEffect(() => {
+    if (!hasInitializedToolCallsRef.current) return;
     const processMessages = async () => {
       for (const message of messages) {
         const parts = (message as any).parts;
@@ -282,6 +311,19 @@ function ChatInterface({
           </div>
         ) : (
           <>
+            {pptPlan?.slides?.length ? (
+              <div className="border-b border-gray-200 bg-white">
+                <div className="w-full max-w-3xl mx-auto px-4 py-3 flex justify-end">
+                  <button
+                    onClick={handleOpenPreview}
+                    className="px-4 py-2 bg-green-500 text-white font-bold rounded-xl border-2 border-gray-900 hover:brightness-110 active:scale-95 transition-all shadow-[3px_3px_0px_rgba(0,0,0,1)]"
+                  >
+                    查看 PPT 预览
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
             <div className="flex-1 overflow-y-auto p-4 scroll-smooth">
               <div className="space-y-6 max-w-3xl mx-auto pb-4">
                   {messages.map(message => (
@@ -364,7 +406,6 @@ function ChatInterface({
             </div>
 
             <PPTPlanPreview
-              projectId={chatId}
               pptPlan={pptPlan}
               onUpdate={handlePptPlanUpdate}
             />

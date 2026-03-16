@@ -1,22 +1,19 @@
 'use client';
 
-import { X, Sparkles, BookOpen, Lightbulb, FileText, Star, Edit2, Save, Trash2, Plus, CheckCircle2, ChevronUp, ChevronDown } from 'lucide-react';
+import { X, Sparkles, BookOpen, Lightbulb, FileText, Star, Edit2, Save, Trash2, Plus, ChevronUp, ChevronDown } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
-import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Slide, SlideType } from '@/lib/chat-store';
 import { moveSlideUp, moveSlideDown } from '@/lib/chat-store';
 
 interface PPTPlanModalProps {
-  projectId: string;
   pptPlan: { slides: Slide[] };
-  onUpdate: (plan: { slides: Slide[] }) => void;
+  onUpdate: (plan: { slides: Slide[] }) => Promise<void> | void;
   onClose: () => void;
 }
 
-export default function PPTPlanModal({ projectId, pptPlan, onUpdate, onClose }: PPTPlanModalProps) {
-  const router = useRouter();
+export default function PPTPlanModal({ pptPlan, onUpdate, onClose }: PPTPlanModalProps) {
   const [slides, setSlides] = useState<Slide[]>(pptPlan.slides);
   const [editingSlideIndex, setEditingSlideIndex] = useState<number | null>(null);
   const [editingSlide, setEditingSlide] = useState<Slide | null>(null);
@@ -26,22 +23,6 @@ export default function PPTPlanModal({ projectId, pptPlan, onUpdate, onClose }: 
   const updateSlides = (newSlides: Slide[]) => {
     setSlides(newSlides);
     onUpdate({ slides: newSlides });
-  };
-
-  useEffect(() => {
-    // Prefetch the preview page for faster navigation
-    router.prefetch('/preview');
-  }, [router]);
-
-  const handleConfirm = () => {
-    try {
-      // Save to sessionStorage as a backup/quick load, but URL param is primary for project identification
-      sessionStorage.setItem('current_ppt_plan', JSON.stringify({ projectId, slides }));
-      router.push(`/preview?id=${projectId}`);
-    } catch (e) {
-      console.error('Failed to save plan', e);
-      alert('PPT计划过大，无法预览');
-    }
   };
 
   useEffect(() => {
@@ -298,21 +279,12 @@ export default function PPTPlanModal({ projectId, pptPlan, onUpdate, onClose }: 
         </div>
 
         <div className="p-4 bg-white border-t-4 border-gray-900">
-          <div className="flex gap-3">
-            <button
-              onClick={onClose}
-              className="flex-1 p-3 bg-gray-200 text-gray-800 font-bold rounded-xl border-2 border-gray-900 hover:brightness-110 active:scale-95 transition-all shadow-[3px_3px_0px_rgba(0,0,0,1)]"
-            >
-              完成编辑
-            </button>
-            <button
-              onClick={handleConfirm}
-              className="flex-1 p-3 bg-green-500 text-white font-bold rounded-xl border-2 border-gray-900 hover:brightness-110 active:scale-95 transition-all shadow-[3px_3px_0px_rgba(0,0,0,1)] flex items-center justify-center gap-2"
-            >
-              <CheckCircle2 size={20} />
-              确认并预览
-            </button>
-          </div>
+          <button
+            onClick={onClose}
+            className="w-full p-3 bg-gray-200 text-gray-800 font-bold rounded-xl border-2 border-gray-900 hover:brightness-110 active:scale-95 transition-all shadow-[3px_3px_0px_rgba(0,0,0,1)]"
+          >
+            完成编辑
+          </button>
         </div>
       </div>
     </div>

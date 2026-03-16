@@ -9,7 +9,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing slideId' }, { status: 400 });
     }
 
-    const success = await clearSlideDialogues(slideId);
+    const success = await clearSlideDialogues(slideId, 'clear_dialogues_for_regen');
     
     if (success) {
       return NextResponse.json({ success: true });

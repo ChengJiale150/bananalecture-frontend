@@ -7,7 +7,7 @@ interface PreviewHeaderProps {
   plan: PPTPlan | null;
   currentSlideIndex: number;
   isGeneratingAll: boolean;
-  generationProgress: { current: number; total: number };
+  generationProgress: { current: number; total: number; failed: number };
   handleStopGeneration: () => void;
   handleGenerateAllDialogues: () => void;
   handleForceRefresh: () => void;

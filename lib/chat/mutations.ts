@@ -1,10 +1,38 @@
 import db from '../db';
 import { ChatRecord, Slide, Dialogue } from '../chat-store';
 import { v4 as uuidv4 } from 'uuid';
-import { normalizeDialogueRole, normalizeDialogueEmotion, normalizeDialogueSpeed } from './utils';
+import {
+  normalizeDialogueRole,
+  normalizeDialogueEmotion,
+  normalizeDialogueSpeed,
+  assertDialogueWriteAction,
+  type DialogueWriteAction,
+} from './utils';
 import { getChatSync } from './queries';
 
-export function syncSlides(projectId: string, slides: Slide[], now: number) {
+type SyncSlidesOptions = {
+  includeDialogues?: boolean;
+};
+
+function logDialogueWriteEvent(params: {
+  scope: string;
+  action: unknown;
+  projectId: string;
+  slideId?: string;
+  success: boolean;
+  reason?: string;
+}) {
+  const { scope, action, projectId, slideId, success, reason } = params;
+  const payload = { action, projectId, slideId: slideId ?? null, success, reason: reason ?? null };
+  if (success) {
+    console.log(`[DialogueWrite][${scope}]`, payload);
+    return;
+  }
+  console.error(`[DialogueWrite][${scope}]`, payload);
+}
+
+export function syncSlides(projectId: string, slides: Slide[], now: number, options?: SyncSlidesOptions) {
+  const includeDialogues = options?.includeDialogues === true;
   const existingRows = db.prepare('SELECT id FROM ppt_plans WHERE project_id = ?').all(projectId) as {id: string}[];
   const existingIds = new Set(existingRows.map(r => r.id));
   const newIds = new Set(slides.map(s => s.id).filter(Boolean));
@@ -60,7 +88,7 @@ export function syncSlides(projectId: string, slides: Slide[], now: number) {
         now
       );
 
-      if (slide.dialogues && slide.dialogues.length > 0) {
+      if (includeDialogues && slide.dialogues && slide.dialogues.length > 0) {
         slide.dialogues.forEach((d, dIdx) => {
           const dId = d.id || uuidv4();
           insertDialogue.run(
@@ -81,7 +109,8 @@ export function syncSlides(projectId: string, slides: Slide[], now: number) {
   });
 }
 
-export function insertSlides(projectId: string, slides: Slide[], now: number) {
+export function insertSlides(projectId: string, slides: Slide[], now: number, options?: SyncSlidesOptions) {
+  const includeDialogues = options?.includeDialogues === true;
   const insertPlan = db.prepare(`
     INSERT INTO ppt_plans (id, project_id, type, title, description, content, idx, image_path, audio_path, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -108,7 +137,7 @@ export function insertSlides(projectId: string, slides: Slide[], now: number) {
       now
     );
 
-    if (slide.dialogues) {
+    if (includeDialogues && slide.dialogues) {
       slide.dialogues.forEach((d, dIdx) => {
         const dId = d.id || uuidv4();
         insertDialogue.run(
@@ -149,7 +178,7 @@ export async function upsertChat(update: Partial<ChatRecord> & { id: string }): 
 
       if ('pptPlan' in update) {
         if (update.pptPlan && update.pptPlan.slides) {
-          syncSlides(projectId, update.pptPlan.slides, now);
+          syncSlides(projectId, update.pptPlan.slides, now, { includeDialogues: false });
         } else {
           db.prepare('DELETE FROM ppt_plans WHERE project_id = ?').run(projectId);
         }
@@ -181,7 +210,7 @@ export async function upsertChat(update: Partial<ChatRecord> & { id: string }): 
       );
 
       if (update.pptPlan && update.pptPlan.slides) {
-        insertSlides(projectId, update.pptPlan.slides, now);
+        insertSlides(projectId, update.pptPlan.slides, now, { includeDialogues: false });
       }
     }
 
@@ -230,7 +259,7 @@ export async function mutateChat<T>(
          
          if (next.pptPlan) {
             if (next.pptPlan.slides) {
-              syncSlides(projectId, next.pptPlan.slides, now);
+             syncSlides(projectId, next.pptPlan.slides, now, { includeDialogues: false });
             } else {
               db.prepare('DELETE FROM ppt_plans WHERE project_id = ?').run(projectId);
             }
@@ -251,7 +280,7 @@ export async function mutateChat<T>(
           );
 
           if (next.pptPlan && next.pptPlan.slides) {
-            insertSlides(projectId, next.pptPlan.slides, now);
+            insertSlides(projectId, next.pptPlan.slides, now, { includeDialogues: false });
           }
        }
     }
@@ -262,11 +291,38 @@ export async function mutateChat<T>(
   return transaction();
 }
 
-export async function clearSlideDialogues(slideId: string): Promise<boolean> {
+export async function clearSlideDialogues(
+  slideId: string,
+  action: DialogueWriteAction = 'clear_dialogues_for_regen',
+): Promise<boolean> {
   try {
+    const projectRow = db
+      .prepare('SELECT project_id FROM ppt_plans WHERE id = ?')
+      .get(slideId) as { project_id: string } | undefined;
+    const projectId = projectRow?.project_id ?? 'unknown';
+    const validatedAction = assertDialogueWriteAction(
+      action,
+      ['clear_dialogues_for_regen'],
+      'clearSlideDialogues',
+    );
     const result = db.prepare('DELETE FROM dialogues WHERE plan_id = ?').run(slideId);
+    logDialogueWriteEvent({
+      scope: 'clearSlideDialogues',
+      action: validatedAction,
+      projectId,
+      slideId,
+      success: true,
+    });
     return result.changes >= 0;
   } catch (error) {
+    logDialogueWriteEvent({
+      scope: 'clearSlideDialogues',
+      action,
+      projectId: 'unknown',
+      slideId,
+      success: false,
+      reason: error instanceof Error ? error.message : 'unknown error',
+    });
     console.error('Failed to clear slide dialogues:', error);
     return false;
   }
@@ -275,13 +331,40 @@ export async function clearSlideDialogues(slideId: string): Promise<boolean> {
 export async function replaceSlideDialogues(
   projectId: string,
   target: { slideId?: string; slideIndex?: number; dialogues: Dialogue[] },
+  action: DialogueWriteAction = 'generate_dialogues',
 ): Promise<ChatRecord | null> {
+  const allowedActions: readonly DialogueWriteAction[] = ['generate_dialogues', 'manual_edit_dialogues'];
+  let validatedAction: DialogueWriteAction;
+  try {
+    validatedAction = assertDialogueWriteAction(action, allowedActions, 'replaceSlideDialogues');
+  } catch (error) {
+    logDialogueWriteEvent({
+      scope: 'replaceSlideDialogues',
+      action,
+      projectId,
+      slideId: target.slideId,
+      success: false,
+      reason: error instanceof Error ? error.message : 'unknown error',
+    });
+    throw error;
+  }
+
   const runTransaction = db.transaction(() => {
     const now = Date.now();
     
     // 1. Validate project exists
     const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(projectId);
-    if (!project) return null;
+    if (!project) {
+      logDialogueWriteEvent({
+        scope: 'replaceSlideDialogues',
+        action: validatedAction,
+        projectId,
+        slideId: target.slideId,
+        success: false,
+        reason: 'project not found',
+      });
+      return null;
+    }
 
     // 2. Find target slide
     let targetSlideId = target.slideId;
@@ -291,7 +374,17 @@ export async function replaceSlideDialogues(
        if (slide) targetSlideId = slide.id;
     }
 
-    if (!targetSlideId) return null;
+    if (!targetSlideId) {
+      logDialogueWriteEvent({
+        scope: 'replaceSlideDialogues',
+        action: validatedAction,
+        projectId,
+        slideId: target.slideId,
+        success: false,
+        reason: 'target slide not found',
+      });
+      return null;
+    }
 
     // 3. Clear existing dialogues for this slide
     // IMPORTANT: We must clear before inserting to avoid duplication or conflicts
@@ -320,6 +413,13 @@ export async function replaceSlideDialogues(
 
     // 5. Update project timestamp
     db.prepare('UPDATE projects SET updated_at = ? WHERE id = ?').run(now, projectId);
+    logDialogueWriteEvent({
+      scope: 'replaceSlideDialogues',
+      action: validatedAction,
+      projectId,
+      slideId: targetSlideId,
+      success: true,
+    });
 
     return projectId;
   });

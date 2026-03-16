@@ -3,13 +3,9 @@ import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 import type { PPTPlan, Slide, Dialogue } from '@/lib/chat-store';
 import type { DialogueAgentUIMessage } from '@/agent/dialogue/agent';
-import { 
-  createClientId, 
-  fetchChat, 
-  saveChatToApi, 
-  normalizeDialogues, 
-  StoredPreviewPlan 
-} from '../utils';
+import { fetchChat, normalizeDialogues } from '../utils';
+
+const GENERATION_TIMEOUT_MS = 120000;
 
 export function usePreviewState(projectIdFromUrl: string | null) {
   const [plan, setPlan] = useState<PPTPlan | null>(null);
@@ -17,34 +13,31 @@ export function usePreviewState(projectIdFromUrl: string | null) {
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [liveDialoguesBySlide, setLiveDialoguesBySlide] = useState<Record<string, Dialogue[]>>({});
-  
   const [isGeneratingAll, setIsGeneratingAll] = useState(false);
-  const [generationQueue, setGenerationQueue] = useState<number[]>([]);
-  const [generationProgress, setGenerationProgress] = useState({ current: 0, total: 0 });
-  
-  const processedOutputIdsRef = useRef<Set<string>>(new Set());
+  const [isSavingDialogues, setIsSavingDialogues] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState({ current: 0, total: 0, failed: 0 });
 
-  // Reset liveDialogues when projectId changes (new project loaded)
-  useEffect(() => {
-    setLiveDialoguesBySlide({});
-  }, [projectId]);
+  const processedOutputIdsRef = useRef<Set<string>>(new Set());
+  const pendingGenerationRef = useRef<Map<string, (success: boolean) => void>>(new Map());
+  const planRef = useRef<PPTPlan | null>(null);
+  const runIdRef = useRef(0);
 
   const { status, sendMessage, messages, stop } = useChat<DialogueAgentUIMessage>({
     transport: new DefaultChatTransport({ api: '/api/dialogue' }),
     id: projectId || 'preview-dialogue',
   });
 
-  // We strictly adhere to DB-First strategy.
-  // SessionStorage is no longer used for persistence to avoid state drift and serialization overhead.
-  const syncSessionStorage = useCallback((_nextProjectId: string, _nextPlan: PPTPlan) => {
-    // No-op: Performance optimization.
-    // We do not write to sessionStorage to avoid blocking the main thread with JSON.stringify on large objects.
-    // All state is persisted to the database immediately.
-  }, []);
+  useEffect(() => {
+    planRef.current = plan;
+  }, [plan]);
+
+  useEffect(() => {
+    setLiveDialoguesBySlide({});
+  }, [projectId]);
 
   const upsertSlideDialogues = useCallback(
     (target: { slideId?: string; slideIndex?: number }, dialogues: Dialogue[]) => {
-      setPlan(prev => {
+      setPlan((prev) => {
         if (!prev?.slides?.length) return prev;
         const updatedSlides = prev.slides.map((slide, index) => {
           const matchById = target.slideId && slide.id === target.slideId;
@@ -54,90 +47,46 @@ export function usePreviewState(projectIdFromUrl: string | null) {
           }
           return slide;
         });
-        const nextPlan = { slides: updatedSlides };
-        if (projectId) {
-          syncSessionStorage(projectId, nextPlan);
-        }
-        return nextPlan;
+        return { slides: updatedSlides };
       });
     },
-    [projectId, syncSessionStorage],
+    [],
   );
 
-  // Load plan from storage or API
+  const refreshPlan = useCallback(async () => {
+    if (!projectId) return;
+    const serverChat = await fetchChat(projectId);
+    if (serverChat?.pptPlan?.slides?.length) {
+      setPlan({ slides: serverChat.pptPlan.slides as Slide[] });
+      return;
+    }
+    setPlan(null);
+  }, [projectId]);
+
   useEffect(() => {
     const loadPlan = async () => {
       try {
-        if (projectIdFromUrl) {
-          setProjectId(projectIdFromUrl);
-          // Always prefer server data first if ID is present
-          const serverChat = await fetchChat(projectIdFromUrl);
-          if (serverChat?.pptPlan?.slides?.length) {
-            const serverPlan = { slides: serverChat.pptPlan.slides as Slide[] };
-            setPlan(serverPlan);
-            // Clear session storage to avoid confusion
-            sessionStorage.removeItem('current_ppt_plan');
-            return;
-          }
+        if (!projectIdFromUrl) {
+          setPlan(null);
+          return;
         }
-
-        // Fallback to session storage only if no server data found (e.g. new unsaved project)
-        const storedPlan = sessionStorage.getItem('current_ppt_plan');
-        const parsed = storedPlan ? (JSON.parse(storedPlan) as StoredPreviewPlan | PPTPlan) : null;
-
-        if (parsed && Array.isArray((parsed as any).slides)) {
-          const slides = (parsed as any).slides as Slide[];
-          const initialPlan = { slides };
-          const parsedProjectId = (parsed as StoredPreviewPlan).projectId;
-          const nextProjectId = projectIdFromUrl || parsedProjectId || createClientId();
-          
-          if (!projectIdFromUrl) {
-              setProjectId(nextProjectId);
-          }
-
-          // If we have a project ID, try to fetch from server again to be sure
-          if (nextProjectId) {
-             const serverChat = await fetchChat(nextProjectId);
-             if (serverChat?.pptPlan?.slides?.length) {
-               const serverPlan = { slides: serverChat.pptPlan.slides as Slide[] };
-               setPlan(serverPlan);
-               return;
-             }
-          }
-
-          setPlan(initialPlan);
-
-          if (!parsedProjectId && !projectIdFromUrl) {
-            await saveChatToApi({
-              id: nextProjectId,
-              title: slides[0]?.title || 'New Project',
-              messages: [],
-              pptPlan: initialPlan,
-            });
-          }
+        setProjectId(projectIdFromUrl);
+        const serverChat = await fetchChat(projectIdFromUrl);
+        if (serverChat?.pptPlan?.slides?.length) {
+          setPlan({ slides: serverChat.pptPlan.slides as Slide[] });
+        } else {
+          setPlan(null);
         }
-      } catch (e) {
-        console.error('Failed to parse plan data from storage or server', e);
+      } catch (error) {
+        console.error('Failed to load preview plan:', error);
       } finally {
         setIsLoading(false);
       }
     };
-
     void loadPlan();
-  }, [projectIdFromUrl, syncSessionStorage]);
+  }, [projectIdFromUrl]);
 
-  // Sync plan to storage when it changes
   useEffect(() => {
-    if (!projectId || !plan) return;
-    syncSessionStorage(projectId, plan);
-  }, [projectId, plan, syncSessionStorage]);
-
-  // Handle messages from AI
-  useEffect(() => {
-    // Check if we are currently generating for the current slide
-    // If so, we should clear any existing dialogues to show the streaming content
-    const _isGeneratingCurrentSlide = status === 'streaming' || status === 'submitted';
-    
     for (const message of messages) {
       const parts = (message as any)?.parts;
       if (!Array.isArray(parts)) continue;
@@ -161,11 +110,9 @@ export function usePreviewState(projectIdFromUrl: string | null) {
           const partialDialogues = normalizeDialogues(input.dialogues);
           const partialSlideId =
             input?.slideId ||
-            (typeof input?.slideIndex === 'number' ? plan?.slides[input.slideIndex]?.id : undefined);
-          
+            (typeof input?.slideIndex === 'number' ? planRef.current?.slides[input.slideIndex]?.id : undefined);
           if (partialSlideId) {
-             // If we are streaming updates for the current slide, ensure we overwrite any stale data
-             setLiveDialoguesBySlide(prev => ({ ...prev, [partialSlideId]: partialDialogues }));
+            setLiveDialoguesBySlide((prev) => ({ ...prev, [partialSlideId]: partialDialogues }));
           }
         }
 
@@ -177,8 +124,8 @@ export function usePreviewState(projectIdFromUrl: string | null) {
         const outputSlideId =
           output?.slideId ||
           input?.slideId ||
-          (typeof output?.slideIndex === 'number' ? plan?.slides[output.slideIndex]?.id : undefined) ||
-          (typeof input?.slideIndex === 'number' ? plan?.slides[input.slideIndex]?.id : undefined);
+          (typeof output?.slideIndex === 'number' ? planRef.current?.slides[output.slideIndex]?.id : undefined) ||
+          (typeof input?.slideIndex === 'number' ? planRef.current?.slides[input.slideIndex]?.id : undefined);
         const outputSlideIndex =
           typeof output?.slideIndex === 'number'
             ? output.slideIndex
@@ -187,210 +134,198 @@ export function usePreviewState(projectIdFromUrl: string | null) {
               : undefined;
 
         upsertSlideDialogues({ slideId: outputSlideId, slideIndex: outputSlideIndex }, finalDialogues);
+
         if (outputSlideId) {
-          setLiveDialoguesBySlide(prev => ({ ...prev, [outputSlideId]: finalDialogues }));
+          setLiveDialoguesBySlide((prev) => ({ ...prev, [outputSlideId]: finalDialogues }));
+          const pendingResolver = pendingGenerationRef.current.get(outputSlideId);
+          if (pendingResolver) {
+            const success = output?.persisted !== false;
+            pendingResolver(success);
+            pendingGenerationRef.current.delete(outputSlideId);
+          }
         }
       }
     }
-  }, [projectId, messages, plan?.slides, syncSessionStorage, upsertSlideDialogues, status]);
+  }, [messages, upsertSlideDialogues]);
 
   const currentSlide = plan?.slides[currentSlideIndex];
 
-  // Dynamically load dialogues for current slide
   useEffect(() => {
-    if (!currentSlide || !currentSlide.id) return;
-    // If we already have dialogues for this slide (either from live generation or previously loaded), skip fetching
+    if (!currentSlide?.id) return;
     if (liveDialoguesBySlide[currentSlide.id] || (currentSlide.dialogues && currentSlide.dialogues.length > 0)) return;
 
     let mounted = true;
     const loadDialogues = async () => {
       try {
         const res = await fetch(`/api/dialogue/list?slideId=${currentSlide.id}`);
-        if (res.ok) {
-          const dialogues = await res.json();
-          if (mounted && Array.isArray(dialogues) && dialogues.length > 0) {
-            setPlan(prev => {
-              if (!prev) return prev;
-              const nextSlides = [...prev.slides];
-              const slideIdx = nextSlides.findIndex(s => s.id === currentSlide.id);
-              if (slideIdx !== -1) {
-                // Merge loaded dialogues, but be careful not to overwrite if live generation happened in the meantime
-                nextSlides[slideIdx] = { ...nextSlides[slideIdx], dialogues };
-              }
-              return { slides: nextSlides };
-            });
+        if (!res.ok) return;
+        const dialogues = await res.json();
+        if (!mounted || !Array.isArray(dialogues) || dialogues.length === 0) return;
+        setPlan((prev) => {
+          if (!prev) return prev;
+          const nextSlides = [...prev.slides];
+          const slideIdx = nextSlides.findIndex((s) => s.id === currentSlide.id);
+          if (slideIdx !== -1) {
+            nextSlides[slideIdx] = { ...nextSlides[slideIdx], dialogues };
           }
-        }
-      } catch (err) {
-        console.error('Failed to fetch dialogues:', err);
+          return { slides: nextSlides };
+        });
+      } catch (error) {
+        console.error('Failed to fetch dialogues:', error);
       }
     };
-    loadDialogues();
-    return () => { mounted = false; };
+    void loadDialogues();
+    return () => {
+      mounted = false;
+    };
   }, [currentSlide, liveDialoguesBySlide]);
 
   const displayDialogues = useMemo(() => {
     if (!currentSlide) return [];
-    
-    // Check if we have explicit "empty" state in liveDialogues (which means cleared)
-    // We need to differentiate between "undefined" (not loaded) and "empty array" (cleared/generating)
     const live = liveDialoguesBySlide[currentSlide.id];
-    
-    if (Array.isArray(live)) {
-       // If it is an array (even empty), it takes precedence over plan.dialogues
-       return live;
-    }
-    
-    if (Array.isArray(currentSlide.dialogues)) {
-      return currentSlide.dialogues;
-    }
+    if (Array.isArray(live)) return live;
+    if (Array.isArray(currentSlide.dialogues)) return currentSlide.dialogues;
     return [];
   }, [currentSlide, liveDialoguesBySlide]);
 
-  const handleGenerateDialogues = useCallback(async () => {
-    if (!projectId || !plan || !currentSlide) return;
-    
-    // 1. Clear backend data first and wait for completion
-    try {
-        await fetch('/api/dialogue/clear', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ slideId: currentSlide.id }),
-        });
-    } catch (e) {
-        console.error("Failed to clear dialogues", e);
-        // Continue anyway to try generation, but log error
-    }
-
-    // 2. Clear frontend cache (liveDialoguesBySlide)
-    // We set it to empty array [] to indicate "cleared/loading" state, NOT undefined.
-    // This forces displayDialogues to return [] instead of falling back to plan.dialogues (which might be stale during async update)
-    setLiveDialoguesBySlide(prev => ({ ...prev, [currentSlide.id]: [] }));
-
-    // 3. Update plan state to clear dialogues immediately
-    setPlan(prev => {
-        if (!prev) return prev;
-        const nextSlides = [...prev.slides];
-        const slideIdx = nextSlides.findIndex(s => s.id === currentSlide.id);
-        if (slideIdx !== -1) {
-            nextSlides[slideIdx] = { ...nextSlides[slideIdx], dialogues: [] };
-        }
-        return { slides: nextSlides };
+  const clearLocalDialogues = useCallback((slideId: string) => {
+    setLiveDialoguesBySlide((prev) => ({ ...prev, [slideId]: [] }));
+    setPlan((prev) => {
+      if (!prev) return prev;
+      const nextSlides = [...prev.slides];
+      const slideIdx = nextSlides.findIndex((s) => s.id === slideId);
+      if (slideIdx !== -1) {
+        nextSlides[slideIdx] = { ...nextSlides[slideIdx], dialogues: [] };
+      }
+      return { slides: nextSlides };
     });
-    
-    // 4. Generate new content
-    // We pass empty previousDialogues to ensure the agent generates from scratch
-    sendMessage(
-      { text: `请为第${currentSlideIndex + 1}页生成口播稿对话` },
-      {
-        body: {
-          id: projectId,
-          autoApprove: true,
-          pptPlan: plan,
-          targetSlideId: currentSlide.id,
-          targetSlideIndex: currentSlideIndex,
-          previousDialogues: [], 
-        },
-      },
-    );
-  }, [projectId, currentSlide, currentSlideIndex, plan, sendMessage]);
+  }, []);
+
+  const generateForSlide = useCallback(
+    async (slide: Slide, slideIndex: number, snapshotPlan: PPTPlan) => {
+      try {
+        await fetch('/api/dialogue/clear', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ slideId: slide.id }),
+        });
+      } catch (error) {
+        console.error('Failed to clear dialogues:', error);
+      }
+
+      clearLocalDialogues(slide.id);
+
+      const completed = await new Promise<boolean>((resolve) => {
+        const timeoutId = setTimeout(() => {
+          pendingGenerationRef.current.delete(slide.id);
+          resolve(false);
+        }, GENERATION_TIMEOUT_MS);
+
+        pendingGenerationRef.current.set(slide.id, (success) => {
+          clearTimeout(timeoutId);
+          resolve(success);
+        });
+
+        sendMessage(
+          { text: `请为第${slideIndex + 1}页生成口播稿对话` },
+          {
+            body: {
+              id: projectId,
+              autoApprove: true,
+              pptPlan: snapshotPlan,
+              targetSlideId: slide.id,
+              targetSlideIndex: slideIndex,
+              previousDialogues: [],
+            },
+          },
+        );
+      });
+
+      return completed;
+    },
+    [clearLocalDialogues, projectId, sendMessage],
+  );
+
+  const handleGenerateDialogues = useCallback(async () => {
+    if (!projectId || !planRef.current || !currentSlide) return;
+    const snapshotPlan = planRef.current;
+    await generateForSlide(currentSlide, currentSlideIndex, snapshotPlan);
+  }, [currentSlide, currentSlideIndex, generateForSlide, projectId]);
 
   const handleStopGeneration = useCallback(() => {
-    setGenerationQueue([]);
+    runIdRef.current += 1;
+    for (const resolver of pendingGenerationRef.current.values()) {
+      resolver(false);
+    }
+    pendingGenerationRef.current.clear();
     stop();
     setIsGeneratingAll(false);
   }, [stop]);
 
-  // Queue-based batch generation effect
-  useEffect(() => {
-    if (!isGeneratingAll) return;
-
-    if (generationQueue.length === 0) {
-      if (status === 'ready') {
-        setIsGeneratingAll(false);
-        // Refresh page data after batch generation
-        window.location.reload(); 
-      }
-      return;
-    }
-
-    if (status === 'ready' && projectId && plan?.slides) {
-      const nextIndex = generationQueue[0];
-      const nextQueue = generationQueue.slice(1);
-      
-      const processNext = async () => {
-          // Update queue immediately to prevent double submission
-          setGenerationQueue(nextQueue);
-          
-          // Update progress
-          setGenerationProgress(prev => ({
-            ...prev,
-            current: prev.total - nextQueue.length
-          }));
-
-          const slide = plan.slides[nextIndex];
-          if (!slide) return;
-
-          // 1. Clear backend data
-          await fetch('/api/dialogue/clear', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ slideId: slide.id }),
-          });
-
-          // 2. Clear frontend cache
-          setLiveDialoguesBySlide(prev => {
-              const next = { ...prev };
-              delete next[slide.id];
-              return next;
-          });
-
-          setPlan(prev => {
-              if (!prev) return prev;
-              const nextSlides = [...prev.slides];
-              const slideIdx = nextSlides.findIndex(s => s.id === slide.id);
-              if (slideIdx !== -1) {
-                  nextSlides[slideIdx] = { ...nextSlides[slideIdx], dialogues: [] };
-              }
-              return { slides: nextSlides };
-          });
-          
-          // 3. Generate new content
-          sendMessage(
-            { text: `请为第${nextIndex + 1}页生成口播稿对话` },
-            {
-              body: {
-                id: projectId,
-                autoApprove: true,
-                pptPlan: plan,
-                targetSlideId: slide.id,
-                targetSlideIndex: nextIndex,
-                previousDialogues: [],
-              },
-            },
-          );
-      };
-      processNext();
-    }
-  }, [isGeneratingAll, generationQueue, status, projectId, plan, sendMessage]);
-
-  const handleGenerateAllDialogues = useCallback(() => {
-    if (!projectId || !plan?.slides.length) return;
-    
+  const handleGenerateAllDialogues = useCallback(async () => {
+    if (!projectId || !planRef.current?.slides.length) return;
+    const runId = Date.now();
+    runIdRef.current = runId;
     setIsGeneratingAll(true);
-    setGenerationProgress({ current: 0, total: plan.slides.length });
-    
-    // Fill queue with all indices
-    const indices = Array.from({ length: plan.slides.length }, (_, i) => i);
-    setGenerationQueue(indices);
-  }, [projectId, plan]);
+    setGenerationProgress({ current: 0, total: planRef.current.slides.length, failed: 0 });
+
+    let failed = 0;
+    const total = planRef.current.slides.length;
+
+    for (let index = 0; index < total; index += 1) {
+      if (runIdRef.current !== runId) break;
+      const snapshotPlan = planRef.current;
+      const slide = snapshotPlan?.slides[index];
+      if (!snapshotPlan || !slide) {
+        failed += 1;
+        setGenerationProgress({ current: index + 1, total, failed });
+        continue;
+      }
+      const success = await generateForSlide(slide, index, snapshotPlan);
+      if (!success) failed += 1;
+      setGenerationProgress({ current: index + 1, total, failed });
+    }
+
+    if (runIdRef.current === runId) {
+      setIsGeneratingAll(false);
+      await refreshPlan();
+    }
+  }, [generateForSlide, projectId, refreshPlan]);
+
+  const handleSaveManualDialogues = useCallback(
+    async (dialogues: Dialogue[]) => {
+      if (!projectId || !currentSlide?.id) return false;
+      setIsSavingDialogues(true);
+      try {
+        const res = await fetch('/api/dialogue', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId,
+            slideId: currentSlide.id,
+            dialogues,
+          }),
+        });
+        if (!res.ok) return false;
+        const result = await res.json();
+        if (!Array.isArray(result?.dialogues)) return false;
+        const normalized = normalizeDialogues(result.dialogues);
+        setLiveDialoguesBySlide((prev) => ({ ...prev, [currentSlide.id]: normalized }));
+        upsertSlideDialogues({ slideId: currentSlide.id }, normalized);
+        return true;
+      } catch (error) {
+        console.error('Failed to save manual dialogues:', error);
+        return false;
+      } finally {
+        setIsSavingDialogues(false);
+      }
+    },
+    [currentSlide?.id, projectId, upsertSlideDialogues],
+  );
 
   const handleForceRefresh = useCallback(() => {
-    // Clear session storage
-    sessionStorage.removeItem('current_ppt_plan');
-    // Reload page to fetch fresh data from DB
-    window.location.reload();
-  }, []);
+    void refreshPlan();
+  }, [refreshPlan]);
 
   return {
     plan,
@@ -399,6 +334,7 @@ export function usePreviewState(projectIdFromUrl: string | null) {
     setCurrentSlideIndex,
     isLoading,
     isGeneratingAll,
+    isSavingDialogues,
     generationProgress,
     status,
     currentSlide,
@@ -406,6 +342,7 @@ export function usePreviewState(projectIdFromUrl: string | null) {
     handleGenerateDialogues,
     handleGenerateAllDialogues,
     handleStopGeneration,
-    handleForceRefresh
+    handleForceRefresh,
+    handleSaveManualDialogues,
   };
 }

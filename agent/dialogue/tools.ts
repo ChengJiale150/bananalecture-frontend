@@ -13,41 +13,72 @@ export const DialogueSchema = z.object({
   speed: DialogueSpeedSchema.describe('语速'),
 });
 
+const CreateDialogueScriptInputSchema = z
+  .object({
+    slideId: z.string().optional().describe('目标页ID'),
+    slideIndex: z.number().int().nonnegative().optional().describe('目标页索引（从0开始）'),
+    dialogues: z.array(DialogueSchema).min(1).describe('当前页完整口播稿对话'),
+  })
+  .refine((value) => Boolean(value.slideId) || typeof value.slideIndex === 'number', {
+    message: 'slideId 与 slideIndex 至少提供一个',
+    path: ['slideId'],
+  });
+
 export function createDialogueTools(chatId: string) {
   const createDialogueScriptTool = tool({
     description: '为当前指定PPT页生成结构化口播稿对话，并持久化保存。',
-    inputSchema: z.object({
-      slideId: z.string().optional().describe('目标页ID'),
-      slideIndex: z.number().int().nonnegative().optional().describe('目标页索引（从0开始）'),
-      dialogues: z.array(DialogueSchema).min(1).describe('当前页完整口播稿对话'),
-    }),
+    inputSchema: CreateDialogueScriptInputSchema,
     async execute({ slideId, slideIndex, dialogues }) {
       console.log(`[Tool] create_dialogue_script called for slide ${slideId || slideIndex}`);
-      
-      const saved = await replaceSlideDialogues(chatId, {
-        slideId,
-        slideIndex,
-        dialogues: dialogues as any,
-      });
+      try {
+        const saved = await replaceSlideDialogues(
+          chatId,
+          {
+            slideId,
+            slideIndex,
+            dialogues: dialogues as any,
+          },
+          'generate_dialogues',
+        );
 
-      if (!saved) {
-        console.error(`[Tool] Failed to save dialogues for slide ${slideId || slideIndex}`);
+        if (!saved) {
+          console.error(`[Tool] Failed to save dialogues for slide ${slideId || slideIndex}`);
+          return {
+            result: '未找到目标页，口播稿保存失败。',
+            slideId,
+            slideIndex,
+            dialogues,
+            count: dialogues.length,
+            timestamp: Date.now(),
+          };
+        }
+
+        console.log(`[Tool] Successfully saved dialogues for slide ${slideId || slideIndex}`);
         return {
-          result: '未找到目标页，口播稿保存失败。',
+          result: '口播稿生成并保存成功！',
           slideId,
           slideIndex,
           dialogues,
+          count: dialogues.length,
+          timestamp: Date.now(),
+          persisted: true,
+          projectId: chatId,
+          pptPlan: saved.pptPlan,
         };
       }
-
-      console.log(`[Tool] Successfully saved dialogues for slide ${slideId || slideIndex}`);
-      return {
-        result: '口播稿生成并保存成功！',
-        slideId,
-        slideIndex,
-        dialogues,
-        pptPlan: saved.pptPlan,
-      };
+      catch (error) {
+        const reason = error instanceof Error ? error.message : 'unknown error';
+        console.error(`[Tool] Failed to save dialogues for slide ${slideId || slideIndex}: ${reason}`);
+        return {
+          result: `口播稿保存失败: ${reason}`,
+          slideId,
+          slideIndex,
+          dialogues,
+          count: dialogues.length,
+          timestamp: Date.now(),
+          persisted: false,
+        };
+      }
     },
   });
 

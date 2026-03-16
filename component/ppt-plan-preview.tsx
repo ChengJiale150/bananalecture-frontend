@@ -12,11 +12,10 @@ const PPTPlanModal = dynamic(() => import('./ppt-plan-modal'), {
 
 interface PPTPlanPreviewProps {
   pptPlan: { slides: Slide[] } | undefined;
-  onUpdate: (plan: { slides: Slide[] }) => void;
-  projectId: string;
+  onUpdate: (plan: { slides: Slide[] }) => Promise<void> | void;
 }
 
-export default function PPTPlanPreview({ pptPlan, onUpdate, projectId }: PPTPlanPreviewProps) {
+export default function PPTPlanPreview({ pptPlan, onUpdate }: PPTPlanPreviewProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Auto-refresh PPT plan when tool completes (listen to event from ToolView)
@@ -91,7 +90,6 @@ export default function PPTPlanPreview({ pptPlan, onUpdate, projectId }: PPTPlan
 
       {isModalOpen && (
         <PPTPlanModal
-          projectId={projectId}
           pptPlan={pptPlan}
           onUpdate={onUpdate}
           onClose={() => setIsModalOpen(false)}

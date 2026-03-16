@@ -2,7 +2,6 @@ import { createDialogueTools } from '@/agent/dialogue/tools';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { ToolLoopAgent, InferAgentUIMessage, hasToolCall } from 'ai';
 import type { PPTPlan, Slide, Dialogue } from '@/lib/chat-store';
-import { type } from 'os';
 
 const kimiClient = createOpenAICompatible({
   name: 'kimi',
@@ -43,8 +42,9 @@ function buildSystemPrompt(options?: DialogueAgentOptions) {
 注意事项:
 1. 所有出现的公式与数学符号均转化为Latex格式,并都用$$包裹,如$$E = m \\\\times c^2$$与$$1-\\\\epsilon$$
 2. 道具为特殊role，当且仅当哆啦A梦首次掏出道具时，添加角色为道具内容为道具名称的对话，后续出现时无需重复添加（仅添加一次）,封面页禁止生成道具角色
-3. 输出前必须调用 create_dialogue_script 工具保存结构化结果
-4. 仅生成当前目标页，不要改写其他页对话
+3. 必须只围绕当前目标页生成，禁止改写或提及其他页对话内容
+4. 输出前必须调用 create_dialogue_script 工具保存结构化结果，禁止返回未持久化的最终答案
+5. 若调用工具失败，必须基于同一目标页立即重试一次；若仍失败，输出明确失败原因
 `;
 
   if (pptPlan?.slides?.length) {
@@ -66,7 +66,7 @@ function buildSystemPrompt(options?: DialogueAgentOptions) {
     prompt += `\n\n## 当前你需要生成的对话部分（重点）\n${formatSlide(targetSlide, fallbackIndex)}`;
   }
 
-  prompt += '\n\n请调用 create_dialogue_script，传入 slideId/slideIndex 与 dialogues 完整数组。';
+  prompt += '\n\n请调用 create_dialogue_script，必须传入 slideId 或 slideIndex，以及 dialogues 完整数组。';
   return prompt;
 }
 

@@ -11,8 +11,9 @@ if (!fs.existsSync(dataDir)) {
 const dbPath = path.join(dataDir, 'main.db');
 const db: DatabaseType = new Database(dbPath);
 
-// Enable foreign keys
+// Enable foreign keys and WAL mode for better performance
 db.pragma('foreign_keys = ON');
+db.pragma('journal_mode = WAL');
 
 export function initDb() {
   const createProjectsTable = `
@@ -60,9 +61,15 @@ export function initDb() {
     );
   `;
 
+  // Add indexes for performance
+  const createProjectIndex = `CREATE INDEX IF NOT EXISTS idx_ppt_plans_project_id ON ppt_plans(project_id);`;
+  const createPlanIndex = `CREATE INDEX IF NOT EXISTS idx_dialogues_plan_id ON dialogues(plan_id);`;
+
   db.exec(createProjectsTable);
   db.exec(createPlansTable);
   db.exec(createDialoguesTable);
+  db.exec(createProjectIndex);
+  db.exec(createPlanIndex);
 }
 
 // Initialize on import (or can be called explicitly)

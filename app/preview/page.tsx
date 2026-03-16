@@ -20,6 +20,7 @@ function PreviewContent() {
     setCurrentSlideIndex,
     isLoading,
     isGeneratingAll,
+    isSavingDialogues,
     generationProgress,
     status,
     currentSlide,
@@ -27,7 +28,8 @@ function PreviewContent() {
     handleGenerateDialogues,
     handleGenerateAllDialogues,
     handleStopGeneration,
-    handleForceRefresh
+    handleForceRefresh,
+    handleSaveManualDialogues,
   } = usePreviewState(projectIdFromUrl);
 
   if (isLoading) {
@@ -64,7 +66,11 @@ function PreviewContent() {
             isGeneratingAll={isGeneratingAll}
             handleGenerateDialogues={handleGenerateDialogues}
           />
-          <DialogueList dialogues={displayDialogues} />
+          <DialogueList
+            dialogues={displayDialogues}
+            isSaving={isSavingDialogues}
+            onSave={handleSaveManualDialogues}
+          />
         </div>
       ) : (
         <EmptyState />
