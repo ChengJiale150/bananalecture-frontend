@@ -1,66 +1,50 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useChat } from '@ai-sdk/react';
-import { DefaultChatTransport } from 'ai';
-import type { PPTPlan, Slide, Dialogue } from '@/lib/chat-store';
-import type { DialogueAgentUIMessage } from '@/agent/dialogue/agent';
-import { fetchChat, normalizeDialogues } from '../utils';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import type { Dialogue, PPTPlan, TaskProgress } from '@/lib/project-types';
+import {
+  addDialogue,
+  batchGenerateAudio,
+  batchGenerateDialogues,
+  batchGenerateImages,
+  cancelTask,
+  deleteDialogue,
+  generateDialogues,
+  generateSlideAudio,
+  generateSlideImage,
+  generateVideo,
+  getProject,
+  getSlideAudioUrl,
+  getSlideImageUrl,
+  getTask,
+  getVideoUrl,
+  listDialogues,
+  reorderDialogues,
+  updateDialogue,
+} from '@/lib/project-api';
+import { normalizeDialogues } from '../utils';
 
-const GENERATION_TIMEOUT_MS = 120000;
+const POLL_INTERVAL_MS = 1500;
+
+function dialoguesDiffer(left: Dialogue, right: Dialogue) {
+  return (
+    left.role !== right.role ||
+    left.content !== right.content ||
+    (left.emotion ?? '无明显情感') !== (right.emotion ?? '无明显情感') ||
+    (left.speed ?? '中速') !== (right.speed ?? '中速')
+  );
+}
 
 export function usePreviewState(projectIdFromUrl: string | null) {
   const [plan, setPlan] = useState<PPTPlan | null>(null);
   const [projectId, setProjectId] = useState<string>(projectIdFromUrl || '');
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
-  const [liveDialoguesBySlide, setLiveDialoguesBySlide] = useState<Record<string, Dialogue[]>>({});
-  const [isGeneratingAll, setIsGeneratingAll] = useState(false);
   const [isSavingDialogues, setIsSavingDialogues] = useState(false);
-  const [generationProgress, setGenerationProgress] = useState({ current: 0, total: 0, failed: 0 });
-
-  const processedOutputIdsRef = useRef<Set<string>>(new Set());
-  const pendingGenerationRef = useRef<Map<string, (success: boolean) => void>>(new Map());
-  const planRef = useRef<PPTPlan | null>(null);
-  const runIdRef = useRef(0);
-
-  const { status, sendMessage, messages, stop } = useChat<DialogueAgentUIMessage>({
-    transport: new DefaultChatTransport({ api: '/api/dialogue' }),
-    id: projectId || 'preview-dialogue',
-  });
-
-  useEffect(() => {
-    planRef.current = plan;
-  }, [plan]);
-
-  useEffect(() => {
-    setLiveDialoguesBySlide({});
-  }, [projectId]);
-
-  const upsertSlideDialogues = useCallback(
-    (target: { slideId?: string; slideIndex?: number }, dialogues: Dialogue[]) => {
-      setPlan((prev) => {
-        if (!prev?.slides?.length) return prev;
-        const updatedSlides = prev.slides.map((slide, index) => {
-          const matchById = target.slideId && slide.id === target.slideId;
-          const matchByIndex = typeof target.slideIndex === 'number' && index === target.slideIndex;
-          if (matchById || matchByIndex) {
-            return { ...slide, dialogues };
-          }
-          return slide;
-        });
-        return { slides: updatedSlides };
-      });
-    },
-    [],
-  );
+  const [activeTask, setActiveTask] = useState<TaskProgress | null>(null);
 
   const refreshPlan = useCallback(async () => {
     if (!projectId) return;
-    const serverChat = await fetchChat(projectId);
-    if (serverChat?.pptPlan?.slides?.length) {
-      setPlan({ slides: serverChat.pptPlan.slides as Slide[] });
-      return;
-    }
-    setPlan(null);
+    const project = await getProject(projectId);
+    setPlan(project.pptPlan ?? null);
   }, [projectId]);
 
   useEffect(() => {
@@ -71,247 +55,175 @@ export function usePreviewState(projectIdFromUrl: string | null) {
           return;
         }
         setProjectId(projectIdFromUrl);
-        const serverChat = await fetchChat(projectIdFromUrl);
-        if (serverChat?.pptPlan?.slides?.length) {
-          setPlan({ slides: serverChat.pptPlan.slides as Slide[] });
-        } else {
-          setPlan(null);
-        }
+        const project = await getProject(projectIdFromUrl);
+        setPlan(project.pptPlan ?? null);
       } catch (error) {
         console.error('Failed to load preview plan:', error);
+        setPlan(null);
       } finally {
         setIsLoading(false);
       }
     };
+
     void loadPlan();
   }, [projectIdFromUrl]);
 
   useEffect(() => {
-    for (const message of messages) {
-      const parts = (message as any)?.parts;
-      if (!Array.isArray(parts)) continue;
+    if (!activeTask || !['pending', 'running'].includes(activeTask.status)) return;
 
-      for (const part of parts) {
-        if (!part || typeof part !== 'object') continue;
-        if ((part as any).type !== 'tool-create_dialogue_script') continue;
+    let cancelled = false;
+    const intervalId = window.setInterval(async () => {
+      try {
+        const nextTask = await getTask(activeTask.id);
+        if (cancelled) return;
+        setActiveTask(nextTask);
 
-        const input =
-          (part as any).input ||
-          (part as any).args ||
-          (part as any).toolInvocation?.input ||
-          (part as any).toolInvocation?.args;
-        const output = (part as any).output || (part as any).result || (part as any).toolInvocation?.output;
-        const toolCallId =
-          (part as any).toolCallId ||
-          (part as any).toolInvocation?.toolCallId ||
-          (part as any).toolInvocation?.toolCallID;
-
-        if (Array.isArray(input?.dialogues)) {
-          const partialDialogues = normalizeDialogues(input.dialogues);
-          const partialSlideId =
-            input?.slideId ||
-            (typeof input?.slideIndex === 'number' ? planRef.current?.slides[input.slideIndex]?.id : undefined);
-          if (partialSlideId) {
-            setLiveDialoguesBySlide((prev) => ({ ...prev, [partialSlideId]: partialDialogues }));
-          }
+        if (!['pending', 'running'].includes(nextTask.status)) {
+          window.clearInterval(intervalId);
+          await refreshPlan();
         }
-
-        if (!toolCallId || processedOutputIdsRef.current.has(toolCallId)) continue;
-        if (!Array.isArray(output?.dialogues)) continue;
-
-        processedOutputIdsRef.current.add(toolCallId);
-        const finalDialogues = normalizeDialogues(output.dialogues);
-        const outputSlideId =
-          output?.slideId ||
-          input?.slideId ||
-          (typeof output?.slideIndex === 'number' ? planRef.current?.slides[output.slideIndex]?.id : undefined) ||
-          (typeof input?.slideIndex === 'number' ? planRef.current?.slides[input.slideIndex]?.id : undefined);
-        const outputSlideIndex =
-          typeof output?.slideIndex === 'number'
-            ? output.slideIndex
-            : typeof input?.slideIndex === 'number'
-              ? input.slideIndex
-              : undefined;
-
-        upsertSlideDialogues({ slideId: outputSlideId, slideIndex: outputSlideIndex }, finalDialogues);
-
-        if (outputSlideId) {
-          setLiveDialoguesBySlide((prev) => ({ ...prev, [outputSlideId]: finalDialogues }));
-          const pendingResolver = pendingGenerationRef.current.get(outputSlideId);
-          if (pendingResolver) {
-            const success = output?.persisted !== false;
-            pendingResolver(success);
-            pendingGenerationRef.current.delete(outputSlideId);
-          }
-        }
+      } catch (error) {
+        console.error('Failed to poll task:', error);
+        window.clearInterval(intervalId);
       }
-    }
-  }, [messages, upsertSlideDialogues]);
+    }, POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [activeTask, refreshPlan]);
 
   const currentSlide = plan?.slides[currentSlideIndex];
 
   useEffect(() => {
-    if (!currentSlide?.id) return;
-    if (liveDialoguesBySlide[currentSlide.id] || (currentSlide.dialogues && currentSlide.dialogues.length > 0)) return;
+    if (!currentSlide?.id || Array.isArray(currentSlide.dialogues)) return;
 
-    let mounted = true;
+    let cancelled = false;
     const loadDialogues = async () => {
       try {
-        const res = await fetch(`/api/dialogue/list?slideId=${currentSlide.id}`);
-        if (!res.ok) return;
-        const dialogues = await res.json();
-        if (!mounted || !Array.isArray(dialogues) || dialogues.length === 0) return;
+        const dialogues = await listDialogues(projectId, currentSlide.id);
+        if (cancelled) return;
         setPlan((prev) => {
           if (!prev) return prev;
-          const nextSlides = [...prev.slides];
-          const slideIdx = nextSlides.findIndex((s) => s.id === currentSlide.id);
-          if (slideIdx !== -1) {
-            nextSlides[slideIdx] = { ...nextSlides[slideIdx], dialogues };
-          }
-          return { slides: nextSlides };
+          return {
+            slides: prev.slides.map((slide) =>
+              slide.id === currentSlide.id ? { ...slide, dialogues } : slide,
+            ),
+          };
         });
       } catch (error) {
         console.error('Failed to fetch dialogues:', error);
       }
     };
+
     void loadDialogues();
     return () => {
-      mounted = false;
+      cancelled = true;
     };
-  }, [currentSlide, liveDialoguesBySlide]);
+  }, [currentSlide?.id, currentSlide?.dialogues, projectId]);
 
   const displayDialogues = useMemo(() => {
-    if (!currentSlide) return [];
-    const live = liveDialoguesBySlide[currentSlide.id];
-    if (Array.isArray(live)) return live;
-    if (Array.isArray(currentSlide.dialogues)) return currentSlide.dialogues;
-    return [];
-  }, [currentSlide, liveDialoguesBySlide]);
+    if (!currentSlide?.dialogues) return [];
+    return currentSlide.dialogues;
+  }, [currentSlide]);
 
-  const clearLocalDialogues = useCallback((slideId: string) => {
-    setLiveDialoguesBySlide((prev) => ({ ...prev, [slideId]: [] }));
+  const replaceSlideDialoguesInState = useCallback((slideId: string, dialogues: Dialogue[]) => {
     setPlan((prev) => {
       if (!prev) return prev;
-      const nextSlides = [...prev.slides];
-      const slideIdx = nextSlides.findIndex((s) => s.id === slideId);
-      if (slideIdx !== -1) {
-        nextSlides[slideIdx] = { ...nextSlides[slideIdx], dialogues: [] };
-      }
-      return { slides: nextSlides };
+      return {
+        slides: prev.slides.map((slide) => (slide.id === slideId ? { ...slide, dialogues } : slide)),
+      };
     });
   }, []);
 
-  const generateForSlide = useCallback(
-    async (slide: Slide, slideIndex: number, snapshotPlan: PPTPlan) => {
-      try {
-        await fetch('/api/dialogue/clear', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ slideId: slide.id }),
-        });
-      } catch (error) {
-        console.error('Failed to clear dialogues:', error);
-      }
-
-      clearLocalDialogues(slide.id);
-
-      const completed = await new Promise<boolean>((resolve) => {
-        const timeoutId = setTimeout(() => {
-          pendingGenerationRef.current.delete(slide.id);
-          resolve(false);
-        }, GENERATION_TIMEOUT_MS);
-
-        pendingGenerationRef.current.set(slide.id, (success) => {
-          clearTimeout(timeoutId);
-          resolve(success);
-        });
-
-        sendMessage(
-          { text: `请为第${slideIndex + 1}页生成口播稿对话` },
-          {
-            body: {
-              id: projectId,
-              autoApprove: true,
-              pptPlan: snapshotPlan,
-              targetSlideId: slide.id,
-              targetSlideIndex: slideIndex,
-              previousDialogues: [],
-            },
-          },
-        );
-      });
-
-      return completed;
-    },
-    [clearLocalDialogues, projectId, sendMessage],
-  );
+  const runTaskAction = useCallback(async (startTask: () => Promise<string>) => {
+    const taskId = await startTask();
+    const task = await getTask(taskId);
+    setActiveTask(task);
+  }, []);
 
   const handleGenerateDialogues = useCallback(async () => {
-    if (!projectId || !planRef.current || !currentSlide) return;
-    const snapshotPlan = planRef.current;
-    await generateForSlide(currentSlide, currentSlideIndex, snapshotPlan);
-  }, [currentSlide, currentSlideIndex, generateForSlide, projectId]);
-
-  const handleStopGeneration = useCallback(() => {
-    runIdRef.current += 1;
-    for (const resolver of pendingGenerationRef.current.values()) {
-      resolver(false);
+    if (!projectId || !currentSlide?.id) return;
+    try {
+      const dialogues = normalizeDialogues(await generateDialogues(projectId, currentSlide.id));
+      replaceSlideDialoguesInState(currentSlide.id, dialogues);
+      await refreshPlan();
+    } catch (error) {
+      console.error('Failed to generate dialogues:', error);
     }
-    pendingGenerationRef.current.clear();
-    stop();
-    setIsGeneratingAll(false);
-  }, [stop]);
+  }, [currentSlide?.id, projectId, refreshPlan, replaceSlideDialoguesInState]);
 
   const handleGenerateAllDialogues = useCallback(async () => {
-    if (!projectId || !planRef.current?.slides.length) return;
-    const runId = Date.now();
-    runIdRef.current = runId;
-    setIsGeneratingAll(true);
-    setGenerationProgress({ current: 0, total: planRef.current.slides.length, failed: 0 });
+    if (!projectId) return;
+    await runTaskAction(() => batchGenerateDialogues(projectId));
+  }, [projectId, runTaskAction]);
 
-    let failed = 0;
-    const total = planRef.current.slides.length;
+  const handleGenerateAllImages = useCallback(async () => {
+    if (!projectId) return;
+    await runTaskAction(() => batchGenerateImages(projectId));
+  }, [projectId, runTaskAction]);
 
-    for (let index = 0; index < total; index += 1) {
-      if (runIdRef.current !== runId) break;
-      const snapshotPlan = planRef.current;
-      const slide = snapshotPlan?.slides[index];
-      if (!snapshotPlan || !slide) {
-        failed += 1;
-        setGenerationProgress({ current: index + 1, total, failed });
-        continue;
-      }
-      const success = await generateForSlide(slide, index, snapshotPlan);
-      if (!success) failed += 1;
-      setGenerationProgress({ current: index + 1, total, failed });
+  const handleGenerateAllAudio = useCallback(async () => {
+    if (!projectId) return;
+    await runTaskAction(() => batchGenerateAudio(projectId));
+  }, [projectId, runTaskAction]);
+
+  const handleGenerateVideo = useCallback(async () => {
+    if (!projectId) return;
+    await runTaskAction(() => generateVideo(projectId));
+  }, [projectId, runTaskAction]);
+
+  const handleStopGeneration = useCallback(async () => {
+    if (!activeTask) return;
+    try {
+      const cancelledTask = await cancelTask(activeTask.id);
+      setActiveTask(cancelledTask);
+    } catch (error) {
+      console.error('Failed to cancel task:', error);
     }
-
-    if (runIdRef.current === runId) {
-      setIsGeneratingAll(false);
-      await refreshPlan();
-    }
-  }, [generateForSlide, projectId, refreshPlan]);
+  }, [activeTask]);
 
   const handleSaveManualDialogues = useCallback(
     async (dialogues: Dialogue[]) => {
       if (!projectId || !currentSlide?.id) return false;
       setIsSavingDialogues(true);
+
       try {
-        const res = await fetch('/api/dialogue', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            projectId,
-            slideId: currentSlide.id,
-            dialogues,
-          }),
-        });
-        if (!res.ok) return false;
-        const result = await res.json();
-        if (!Array.isArray(result?.dialogues)) return false;
-        const normalized = normalizeDialogues(result.dialogues);
-        setLiveDialoguesBySlide((prev) => ({ ...prev, [currentSlide.id]: normalized }));
-        upsertSlideDialogues({ slideId: currentSlide.id }, normalized);
+        const existingDialogues = currentSlide.dialogues ?? [];
+        const existingById = new Map(existingDialogues.map((dialogue) => [dialogue.id, dialogue]));
+        const nextIds = new Set(dialogues.map((dialogue) => dialogue.id));
+
+        for (const existing of existingDialogues) {
+          if (!nextIds.has(existing.id)) {
+            await deleteDialogue(projectId, currentSlide.id, existing.id);
+          }
+        }
+
+        const finalDialogues: Dialogue[] = [];
+
+        for (const dialogue of dialogues) {
+          const existing = existingById.get(dialogue.id);
+          if (!existing) {
+            finalDialogues.push(await addDialogue(projectId, currentSlide.id, dialogue));
+            continue;
+          }
+
+          if (dialoguesDiffer(existing, dialogue)) {
+            finalDialogues.push(await updateDialogue(projectId, currentSlide.id, dialogue));
+          } else {
+            finalDialogues.push(dialogue);
+          }
+        }
+
+        await reorderDialogues(
+          projectId,
+          currentSlide.id,
+          finalDialogues.map((dialogue) => dialogue.id),
+        );
+
+        const latestDialogues = normalizeDialogues(await listDialogues(projectId, currentSlide.id));
+        replaceSlideDialoguesInState(currentSlide.id, latestDialogues);
         return true;
       } catch (error) {
         console.error('Failed to save manual dialogues:', error);
@@ -320,12 +232,55 @@ export function usePreviewState(projectIdFromUrl: string | null) {
         setIsSavingDialogues(false);
       }
     },
-    [currentSlide?.id, projectId, upsertSlideDialogues],
+    [currentSlide, projectId, replaceSlideDialoguesInState],
   );
 
-  const handleForceRefresh = useCallback(() => {
-    void refreshPlan();
-  }, [refreshPlan]);
+  const handleGenerateImage = useCallback(async () => {
+    if (!projectId || !currentSlide?.id) return;
+    try {
+      await generateSlideImage(projectId, currentSlide.id);
+      await refreshPlan();
+    } catch (error) {
+      console.error('Failed to generate image:', error);
+    }
+  }, [currentSlide?.id, projectId, refreshPlan]);
+
+  const handleGenerateAudio = useCallback(async () => {
+    if (!projectId || !currentSlide?.id) return;
+    try {
+      await generateSlideAudio(projectId, currentSlide.id);
+      await refreshPlan();
+    } catch (error) {
+      console.error('Failed to generate audio:', error);
+    }
+  }, [currentSlide?.id, projectId, refreshPlan]);
+
+  const handleOpenSlideAudio = useCallback(() => {
+    if (!projectId || !currentSlide?.id) return;
+    window.open(getSlideAudioUrl(projectId, currentSlide.id), '_blank', 'noopener,noreferrer');
+  }, [currentSlide?.id, projectId]);
+
+  const handleOpenSlideImage = useCallback(() => {
+    if (!projectId || !currentSlide?.id) return;
+    window.open(getSlideImageUrl(projectId, currentSlide.id), '_blank', 'noopener,noreferrer');
+  }, [currentSlide?.id, projectId]);
+
+  const handleOpenVideo = useCallback(() => {
+    if (!projectId) return;
+    window.open(getVideoUrl(projectId), '_blank', 'noopener,noreferrer');
+  }, [projectId]);
+
+  const generationProgress = useMemo(() => {
+    if (!activeTask || activeTask.totalSteps <= 0) {
+      return { current: 0, total: 0, failed: activeTask?.status === 'failed' ? 1 : 0 };
+    }
+
+    return {
+      current: activeTask.currentStep,
+      total: activeTask.totalSteps,
+      failed: activeTask.status === 'failed' ? 1 : 0,
+    };
+  }, [activeTask]);
 
   return {
     plan,
@@ -333,16 +288,24 @@ export function usePreviewState(projectIdFromUrl: string | null) {
     currentSlideIndex,
     setCurrentSlideIndex,
     isLoading,
-    isGeneratingAll,
+    isGeneratingAll: Boolean(activeTask && ['pending', 'running'].includes(activeTask.status)),
     isSavingDialogues,
     generationProgress,
-    status,
+    activeTask,
     currentSlide,
     displayDialogues,
     handleGenerateDialogues,
     handleGenerateAllDialogues,
+    handleGenerateAllImages,
+    handleGenerateAllAudio,
+    handleGenerateVideo,
     handleStopGeneration,
-    handleForceRefresh,
+    handleForceRefresh: refreshPlan,
     handleSaveManualDialogues,
+    handleGenerateImage,
+    handleGenerateAudio,
+    handleOpenSlideAudio,
+    handleOpenSlideImage,
+    handleOpenVideo,
   };
 }

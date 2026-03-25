@@ -22,14 +22,22 @@ function PreviewContent() {
     isGeneratingAll,
     isSavingDialogues,
     generationProgress,
-    status,
+    activeTask,
     currentSlide,
     displayDialogues,
     handleGenerateDialogues,
     handleGenerateAllDialogues,
+    handleGenerateAllImages,
+    handleGenerateAllAudio,
+    handleGenerateVideo,
     handleStopGeneration,
     handleForceRefresh,
     handleSaveManualDialogues,
+    handleGenerateImage,
+    handleGenerateAudio,
+    handleOpenSlideAudio,
+    handleOpenSlideImage,
+    handleOpenVideo,
   } = usePreviewState(projectIdFromUrl);
 
   if (isLoading) {
@@ -53,8 +61,13 @@ function PreviewContent() {
         currentSlideIndex={currentSlideIndex}
         isGeneratingAll={isGeneratingAll}
         generationProgress={generationProgress}
+        activeTask={activeTask}
         handleStopGeneration={handleStopGeneration}
         handleGenerateAllDialogues={handleGenerateAllDialogues}
+        handleGenerateAllImages={handleGenerateAllImages}
+        handleGenerateAllAudio={handleGenerateAllAudio}
+        handleGenerateVideo={handleGenerateVideo}
+        handleOpenVideo={handleOpenVideo}
         handleForceRefresh={handleForceRefresh}
       />
 
@@ -62,9 +75,12 @@ function PreviewContent() {
         <div className="flex-1 flex overflow-hidden">
           <SlideViewer 
             currentSlide={currentSlide}
-            status={status}
             isGeneratingAll={isGeneratingAll}
             handleGenerateDialogues={handleGenerateDialogues}
+            handleGenerateImage={handleGenerateImage}
+            handleGenerateAudio={handleGenerateAudio}
+            handleOpenSlideAudio={handleOpenSlideAudio}
+            handleOpenSlideImage={handleOpenSlideImage}
           />
           <DialogueList
             dialogues={displayDialogues}

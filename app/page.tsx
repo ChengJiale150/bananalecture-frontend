@@ -6,67 +6,41 @@ import Sidebar from '@/component/sidebar';
 import ToolView from '@/component/tool-view';
 import PPTPlanPreview from '@/component/ppt-plan-preview';
 import type { PlannerAgentUIMessage } from '@/agent/planner/agent';
-import type { Slide } from '@/lib/chat-store';
+import type { ProjectRecord, ProjectSummary, Slide } from '@/lib/project-types';
+import {
+  createProject,
+  deleteProject,
+  getProject,
+  listProjects,
+  renameProject,
+  replaceProjectSlides,
+  updateProjectMessages,
+  updateProjectTitleAndMessages,
+  updateSlide,
+  addSlide,
+  deleteSlide,
+  reorderSlides,
+} from '@/lib/project-api';
 import { useState, useEffect, useCallback, useRef, memo } from 'react';
 import { Loader2, BrainCircuit, ChevronDown, ChevronRight } from 'lucide-react';
-import { v4 as uuidv4 } from 'uuid';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useRouter } from 'next/navigation';
 
-// --- Types ---
+const DEFAULT_PROJECT_TITLE = 'New Project';
 
-interface ChatSession {
-  id: string;
-  title: string;
-  createdAt: number;
-}
-
-// --- API Helpers ---
-
-async function fetchChats(): Promise<ChatSession[]> {
-  const res = await fetch('/api/history');
-  if (!res.ok) return [];
-  return res.json();
-}
-
-async function fetchChat(id: string) {
-  const res = await fetch(`/api/history?id=${id}`, { cache: 'no-store' });
-  if (!res.ok) return null;
-  return res.json();
-}
-
-async function saveChatToApi(chat: {
-  id: string;
-  title?: string;
-  messages?: any[];
-  pptPlan?: any;
-}) {
-  await fetch('/api/history', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(chat),
-  });
-}
-
-async function deleteChatFromApi(id: string) {
-  await fetch(`/api/history?id=${id}`, { method: 'DELETE' });
-}
-
-// --- Components ---
-
-const ThinkingBlock = memo(function ThinkingBlock({ content, isComplete }: { content: string, isComplete?: boolean }) {
+const ThinkingBlock = memo(function ThinkingBlock({ content, isComplete }: { content: string; isComplete?: boolean }) {
   const [isOpen, setIsOpen] = useState(true);
 
   useEffect(() => {
-      if (isComplete) {
-          setIsOpen(false);
-      }
+    if (isComplete) {
+      setIsOpen(false);
+    }
   }, [isComplete]);
 
   return (
     <div className="border border-gray-200 rounded-lg overflow-hidden my-2 bg-gray-50">
-      <button 
+      <button
         onClick={() => setIsOpen(!isOpen)}
         className="w-full flex items-center gap-2 p-2 bg-gray-100 hover:bg-gray-200 transition-colors text-xs font-medium text-gray-600"
       >
@@ -74,7 +48,7 @@ const ThinkingBlock = memo(function ThinkingBlock({ content, isComplete }: { con
         <BrainCircuit size={14} />
         <span>Thinking Process</span>
       </button>
-      
+
       {isOpen && (
         <div className="p-3 text-sm text-gray-600 font-mono whitespace-pre-wrap border-t border-gray-200 bg-gray-50/50">
           {content}
@@ -84,29 +58,91 @@ const ThinkingBlock = memo(function ThinkingBlock({ content, isComplete }: { con
   );
 });
 
-// --- Chat Interface Component ---
+function extractAutoTitle(messages: any[]) {
+  const firstMessage = messages.find((message) => message?.role === 'user');
+  if (!firstMessage) return DEFAULT_PROJECT_TITLE;
+  const textPart = Array.isArray(firstMessage.parts)
+    ? firstMessage.parts.find((part: any) => part?.type === 'text')?.text
+    : firstMessage.content;
+  if (typeof textPart !== 'string' || !textPart.trim()) return DEFAULT_PROJECT_TITLE;
+  return textPart.trim().slice(0, 30);
+}
 
-function ChatInterface({ 
-  chatId, 
-  initialMessages, 
-  initialPptPlan,
-  onChatUpdate 
-}: { 
-  chatId: string; 
-  initialMessages: any[];
-  initialPptPlan?: { slides: Slide[] };
-  onChatUpdate: (chat: any) => void;
+function slideChanged(prev: Slide, next: Slide) {
+  return (
+    prev.type !== next.type ||
+    prev.title !== next.title ||
+    prev.description !== next.description ||
+    (prev.content ?? '') !== (next.content ?? '') ||
+    (prev.imagePath ?? '') !== (next.imagePath ?? '') ||
+    (prev.audioPath ?? '') !== (next.audioPath ?? '')
+  );
+}
+
+async function syncManualPlanChanges(projectId: string, previousPlan: { slides: Slide[] } | undefined, nextPlan: { slides: Slide[] }) {
+  const previousSlides = previousPlan?.slides ?? [];
+  const previousById = new Map(previousSlides.map((slide) => [slide.id, slide]));
+  const incomingIds = new Set(nextPlan.slides.map((slide) => slide.id));
+
+  for (const previousSlide of previousSlides) {
+    if (!incomingIds.has(previousSlide.id)) {
+      await deleteSlide(projectId, previousSlide.id);
+    }
+  }
+
+  const resolvedSlides: Slide[] = [];
+
+  for (const slide of nextPlan.slides) {
+    const existing = previousById.get(slide.id);
+    if (existing) {
+      if (slideChanged(existing, slide)) {
+        resolvedSlides.push(await updateSlide(projectId, slide.id, slide));
+      } else {
+        resolvedSlides.push(slide);
+      }
+      continue;
+    }
+
+    resolvedSlides.push(await addSlide(projectId, slide));
+  }
+
+  if (resolvedSlides.length > 0) {
+    await reorderSlides(
+      projectId,
+      resolvedSlides.map((slide) => slide.id),
+    );
+  }
+
+  return { slides: resolvedSlides };
+}
+
+function ChatInterface({
+  project,
+  onProjectUpdate,
+}: {
+  project: ProjectRecord;
+  onProjectUpdate: (project: Partial<ProjectRecord> & { id: string }) => void;
 }) {
   const router = useRouter();
-  const { status, sendMessage, messages, stop, setMessages, addToolApprovalResponse } =
-    useChat<PlannerAgentUIMessage>({
+  const chatId = project.id;
+  const { status, sendMessage, messages, stop, setMessages, addToolApprovalResponse } = useChat<PlannerAgentUIMessage>({
     id: chatId,
   });
 
+  const [autoApproveAfter, setAutoApproveAfter] = useState(false);
+  const [pptPlan, setPptPlan] = useState(project.pptPlan);
+  const processedToolCallIds = useRef<Set<string>>(new Set());
+  const processedApprovalIds = useRef<Set<string>>(new Set());
+  const prevStatusRef = useRef(status);
+  const hasInitializedToolCallsRef = useRef(false);
+  const projectTitleRef = useRef(project.title);
+
   useEffect(() => {
-    setMessages(initialMessages);
+    setMessages(project.messages ?? []);
+    setPptPlan(project.pptPlan);
+    projectTitleRef.current = project.title;
     const restoredToolCallIds = new Set<string>();
-    initialMessages.forEach((message: any) => {
+    (project.messages ?? []).forEach((message: any) => {
       const parts = message?.parts;
       if (!Array.isArray(parts)) return;
       parts.forEach((part: any) => {
@@ -121,30 +157,7 @@ function ChatInterface({
     });
     processedToolCallIds.current = restoredToolCallIds;
     hasInitializedToolCallsRef.current = true;
-  }, [initialMessages, setMessages]); // Added dependencies
-
-  const [autoApproveAfter, setAutoApproveAfter] = useState(false);
-  const [pptPlan, setPptPlan] = useState<{ slides: Slide[] } | undefined>(() => {
-    if (!initialPptPlan?.slides) return initialPptPlan;
-    // Filter out invalid empty slides that might have been saved due to corruption
-    const validSlides = initialPptPlan.slides.filter(s => s && Object.keys(s).length > 0 && s.type);
-    if (validSlides.length === 0 && initialPptPlan.slides.length > 0) return undefined;
-    return { slides: validSlides };
-  });
-
-  useEffect(() => {
-    if (!initialPptPlan?.slides) {
-      setPptPlan(undefined);
-      return;
-    }
-    const validSlides = initialPptPlan.slides.filter(s => s && Object.keys(s).length > 0 && s.type);
-    setPptPlan(validSlides.length > 0 ? { slides: validSlides } : undefined);
-  }, [initialPptPlan]);
-
-  const processedToolCallIds = useRef<Set<string>>(new Set());
-  const processedApprovalIds = useRef<Set<string>>(new Set());
-  const prevStatusRef = useRef(status);
-  const hasInitializedToolCallsRef = useRef(false);
+  }, [project, setMessages]);
 
   const submitApproval = useCallback(
     (approvalId: string, approved: boolean, reason?: string, enableAutoApprove?: boolean) => {
@@ -181,68 +194,54 @@ function ChatInterface({
   useEffect(() => {
     if (prevStatusRef.current !== 'ready' && status === 'ready' && messages.length > 0) {
       const save = async () => {
-        const title = (messages[0] as any)?.content?.slice(0, 30) || 'New Chat';
-        const chatData = {
-          id: chatId,
-          title,
-          messages,
-        };
-        await saveChatToApi(chatData);
-        onChatUpdate(chatData);
+        const nextTitle =
+          projectTitleRef.current === DEFAULT_PROJECT_TITLE ? extractAutoTitle(messages) : projectTitleRef.current;
+
+        if (nextTitle !== projectTitleRef.current) {
+          projectTitleRef.current = nextTitle;
+          await updateProjectTitleAndMessages(chatId, nextTitle, messages);
+          onProjectUpdate({ id: chatId, title: nextTitle, messages });
+          return;
+        }
+
+        await updateProjectMessages(chatId, messages);
+        onProjectUpdate({ id: chatId, messages });
       };
-      save();
+
+      void save();
     }
     prevStatusRef.current = status;
-  }, [status, messages, chatId, onChatUpdate]);
+  }, [status, messages, chatId, onProjectUpdate]);
 
-  useEffect(() => {
-    if (!chatId) return;
-    if (status !== 'streaming' && status !== 'submitted') return;
+  const handlePptPlanUpdate = useCallback(
+    async (newPlan: { slides: Slide[] }) => {
+      const syncedPlan = await syncManualPlanChanges(chatId, pptPlan, newPlan);
+      setPptPlan(syncedPlan);
+      onProjectUpdate({ id: chatId, pptPlan: syncedPlan });
+    },
+    [chatId, onProjectUpdate, pptPlan],
+  );
 
-    let cancelled = false;
-    const intervalId = setInterval(async () => {
-      try {
-        const serverChat = await fetchChat(chatId);
-        if (cancelled || !serverChat) return;
-        // Data is polled but no longer kept in local state for UI display
-      } catch {
-      }
-    }, 2000);
+  const handleSendMessage = useCallback(
+    (text: string, options?: any) => {
+      const body: any = {
+        id: chatId,
+        autoApprove: autoApproveAfter,
+        pptPlan,
+        ...options,
+      };
+      sendMessage({ text }, { body });
+    },
+    [chatId, autoApproveAfter, pptPlan, sendMessage],
+  );
 
-    return () => {
-      cancelled = true;
-      clearInterval(intervalId);
-    };
-  }, [chatId, status]);
-
-  const handlePptPlanUpdate = useCallback(async (newPlan: { slides: Slide[] }) => {
-    console.log('PPT Plan updated, new slide order:', newPlan.slides.map(s => s.title));
-    setPptPlan(newPlan);
-    await saveChatToApi({ id: chatId, pptPlan: newPlan });
-    onChatUpdate({ id: chatId, pptPlan: newPlan });
-  }, [chatId, onChatUpdate]);
-
-  const handleSendMessage = useCallback((text: string, options?: any) => {
-    const body: any = {
-      id: chatId,
-      autoApprove: autoApproveAfter,
-      pptPlan: pptPlan,
-      ...options
-    };
-    sendMessage({ text }, { body });
-  }, [chatId, autoApproveAfter, pptPlan, sendMessage]);
-
-  const handleOpenPreview = useCallback(async () => {
-    try {
-      await fetch(`/api/history?id=${chatId}`, { cache: 'no-store' });
-    } catch (error) {
-      console.error('Failed to refresh project before preview:', error);
-    }
+  const handleOpenPreview = useCallback(() => {
     router.push(`/preview?id=${chatId}&refresh=${Date.now()}`);
   }, [chatId, router]);
 
   useEffect(() => {
     if (!hasInitializedToolCallsRef.current) return;
+
     const processMessages = async () => {
       for (const message of messages) {
         const parts = (message as any).parts;
@@ -251,44 +250,31 @@ function ChatInterface({
         for (const part of parts) {
           if (!part || typeof part !== 'object') continue;
           const type = (part as any)?.type;
+          const partState = (part as any)?.state || (part as any)?.toolInvocation?.state;
           const toolCallId =
             part?.toolCallId || part?.toolInvocation?.toolCallId || part?.toolInvocation?.toolCallID || 'unknown';
           if (processedToolCallIds.current.has(toolCallId)) continue;
 
-          if (type === 'tool-create_ppt_plan') {
-            const args = part?.args || part?.toolInvocation?.args || part?.input || part?.toolInvocation?.input;
-            const output = part?.output || part?.toolInvocation?.output;
-            const slides = output?.pptPlan?.slides || output?.slides || args?.slides;
-            if (!Array.isArray(slides)) continue;
+          if (type !== 'tool-create_ppt_plan') continue;
+          if (partState !== 'result' && partState !== 'output-available') continue;
 
-            const slidesWithId = slides.map((s: any, idx: number) => {
-              // Preserve existing IDs if we already have a plan to avoid wiping out dialogues
-              const existingSlide = pptPlan?.slides?.[idx];
-              return {
-                ...s,
-                id: s.id || existingSlide?.id || uuidv4(),
-                dialogues: s.dialogues || existingSlide?.dialogues || [], 
-              };
-            });
+          const args = part?.args || part?.toolInvocation?.args || part?.input || part?.toolInvocation?.input;
+          const output = part?.output || part?.toolInvocation?.output;
+          const slides = output?.slides || args?.slides;
+          if (!Array.isArray(slides)) continue;
 
-            processedToolCallIds.current.add(toolCallId);
-            const nextPptPlan = { slides: slidesWithId };
-            
-            // Only update if something actually changed to avoid infinite save loops
-            if (JSON.stringify(nextPptPlan.slides) === JSON.stringify(pptPlan?.slides || [])) {
-              continue;
-            }
-            
-            setPptPlan(nextPptPlan);
-            await saveChatToApi({ id: chatId, pptPlan: nextPptPlan });
-            onChatUpdate({ id: chatId, pptPlan: nextPptPlan });
-          }
+          processedToolCallIds.current.add(toolCallId);
+
+          const persistedSlides = slides.length > 0 ? await replaceProjectSlides(chatId, slides as Slide[]) : [];
+          const nextPptPlan = persistedSlides.length > 0 ? { slides: persistedSlides } : undefined;
+          setPptPlan(nextPptPlan);
+          onProjectUpdate({ id: chatId, pptPlan: nextPptPlan });
         }
       }
     };
-    
+
     void processMessages();
-  }, [messages, chatId, onChatUpdate, pptPlan]);
+  }, [messages, chatId, onProjectUpdate]);
 
   return (
     <div className="flex flex-col lg:flex-row h-screen bg-[#F0F8FF]">
@@ -301,12 +287,7 @@ function ChatInterface({
             <h2 className="text-3xl font-black mb-2 text-gray-900 tracking-tight">Doraemon Agent</h2>
             <p className="text-lg font-medium text-gray-600 mb-8">What can I help you with today?</p>
             <div className="w-full max-w-3xl">
-              <ChatInput
-                status={status}
-                onSubmit={handleSendMessage}
-                stop={stop}
-                isCentered={true}
-              />
+              <ChatInput status={status} onSubmit={handleSendMessage} stop={stop} isCentered={true} />
             </div>
           </div>
         ) : (
@@ -326,98 +307,108 @@ function ChatInterface({
 
             <div className="flex-1 overflow-y-auto p-4 scroll-smooth">
               <div className="space-y-6 max-w-3xl mx-auto pb-4">
-                  {messages.map(message => (
+                {messages.map((message) => (
                   <div key={message.id} className={`flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
-                      <div className={`
-                          px-6 py-4 rounded-2xl max-w-[90%] lg:max-w-[80%] transition-all
-                          ${message.role === 'user' 
-                              ? 'bg-[var(--doraemon-yellow)] text-gray-900 border-2 border-gray-900 shadow-[4px_4px_0px_rgba(0,0,0,1)] rounded-br-none' 
-                              : 'bg-white border-2 border-gray-900 text-gray-900 shadow-[4px_4px_0px_rgba(0,0,0,1)] rounded-bl-none'}
-                      `}>
-                      <div className={`font-bold text-xs mb-2 uppercase tracking-wide ${message.role === 'user' ? 'text-gray-700' : 'text-[var(--doraemon-blue)]'}`}>
-                          {message.role === 'user' ? 'You' : 'Agent'}
+                    <div
+                      className={`px-6 py-4 rounded-2xl max-w-[90%] lg:max-w-[80%] transition-all ${
+                        message.role === 'user'
+                          ? 'bg-[var(--doraemon-yellow)] text-gray-900 border-2 border-gray-900 shadow-[4px_4px_0px_rgba(0,0,0,1)] rounded-br-none'
+                          : 'bg-white border-2 border-gray-900 text-gray-900 shadow-[4px_4px_0px_rgba(0,0,0,1)] rounded-bl-none'
+                      }`}
+                    >
+                      <div
+                        className={`font-bold text-xs mb-2 uppercase tracking-wide ${
+                          message.role === 'user' ? 'text-gray-700' : 'text-[var(--doraemon-blue)]'
+                        }`}
+                      >
+                        {message.role === 'user' ? 'You' : 'Agent'}
                       </div>
-                      
-                <div className="space-y-2 overflow-hidden">
-                          {message.parts?.map((part, index) => {
-                              if (!part || typeof part !== 'object') return null;
-                              const partType = (part as any).type;
-                              if (!partType) return null;
-                              switch (partType) {
-                              case 'text':
-                                  {
-                                    const text = (part as { text?: string }).text;
-                                    if (typeof text !== 'string') return null;
-                                  return (
-                                      <div key={index} className="prose prose-sm max-w-none dark:prose-invert">
-                                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
-                                      </div>
-                                  );
-                                }
 
-                              case 'reasoning': 
-                                  {
-                                    const text = (part as { text?: string }).text;
-                                    if (typeof text !== 'string') return null;
-                                    return <ThinkingBlock key={index} content={text} isComplete={status !== 'streaming' || index < (message.parts?.length ?? 0) - 1 || messages.indexOf(message) < messages.length - 1} />;
+                      <div className="space-y-2 overflow-hidden">
+                        {message.parts?.map((part, index) => {
+                          if (!part || typeof part !== 'object') return null;
+                          const partType = (part as any).type;
+                          if (!partType) return null;
+                          switch (partType) {
+                            case 'text': {
+                              const text = (part as { text?: string }).text;
+                              if (typeof text !== 'string') return null;
+                              return (
+                                <div key={index} className="prose prose-sm max-w-none dark:prose-invert">
+                                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+                                </div>
+                              );
+                            }
+
+                            case 'reasoning': {
+                              const text = (part as { text?: string }).text;
+                              if (typeof text !== 'string') return null;
+                              return (
+                                <ThinkingBlock
+                                  key={index}
+                                  content={text}
+                                  isComplete={
+                                    status !== 'streaming' ||
+                                    index < (message.parts?.length ?? 0) - 1 ||
+                                    messages.indexOf(message) < messages.length - 1
                                   }
+                                />
+                              );
+                            }
 
-                              case 'step-start':
-                                  return (
-                                      <div key={index} className="flex items-center gap-2 text-xs text-gray-400 my-1 animate-pulse">
-                                          <BrainCircuit size={12} />
-                                          <span>Thinking...</span>
-                                      </div>
-                                  );
-                              
-                              case 'tool-create_ppt_plan': {
-                                   const p = part as any;
-                                   return <ToolView key={index} invocation={{ 
-                                       toolName: 'create_ppt_plan', 
-                                     args: p.args || p.toolInvocation?.args || p.input || p.toolInvocation?.input, 
-                                     result: p.result || p.toolInvocation?.result || p.output || p.toolInvocation?.output,
-                                       state: p.state || p.toolInvocation?.state,
-                                       toolCallId: p.toolCallId || p.toolInvocation?.toolCallId || 'unknown',
-                                       approval: p.approval || p.toolInvocation?.approval
-                                   }} />;
-                              }
-                              
-                              default:
-                                   return null;
-                              }
-                          })}
-                          {!message.parts && (message as any).content && (
-                              <div className="prose prose-sm max-w-none dark:prose-invert">
-                                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{(message as any).content}</ReactMarkdown>
-                              </div>
-                          )}
+                            case 'step-start':
+                              return (
+                                <div key={index} className="flex items-center gap-2 text-xs text-gray-400 my-1 animate-pulse">
+                                  <BrainCircuit size={12} />
+                                  <span>Thinking...</span>
+                                </div>
+                              );
+
+                            case 'tool-create_ppt_plan': {
+                              const p = part as any;
+                              return (
+                                <ToolView
+                                  key={index}
+                                  invocation={{
+                                    toolName: 'create_ppt_plan',
+                                    args: p.args || p.toolInvocation?.args || p.input || p.toolInvocation?.input,
+                                    result: p.result || p.toolInvocation?.result || p.output || p.toolInvocation?.output,
+                                    state: p.state || p.toolInvocation?.state,
+                                    toolCallId: p.toolCallId || p.toolInvocation?.toolCallId || 'unknown',
+                                    approval: p.approval || p.toolInvocation?.approval,
+                                  }}
+                                />
+                              );
+                            }
+
+                            default:
+                              return null;
+                          }
+                        })}
+                        {!message.parts && (message as any).content && (
+                          <div className="prose prose-sm max-w-none dark:prose-invert">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{(message as any).content}</ReactMarkdown>
+                          </div>
+                        )}
                       </div>
-                      </div>
+                    </div>
                   </div>
-                  ))}
-                  
-                  {status === 'streaming' && (
-                      <div className="flex items-center gap-2 text-gray-400 text-sm ml-4">
-                          <Loader2 size={14} className="animate-spin" />
-                          <span>Agent is working...</span>
-                      </div>
-                  )}
+                ))}
+
+                {status === 'streaming' && (
+                  <div className="flex items-center gap-2 text-gray-400 text-sm ml-4">
+                    <Loader2 size={14} className="animate-spin" />
+                    <span>Agent is working...</span>
+                  </div>
+                )}
               </div>
             </div>
 
-            <PPTPlanPreview
-              pptPlan={pptPlan}
-              onUpdate={handlePptPlanUpdate}
-            />
+            <PPTPlanPreview pptPlan={pptPlan} onUpdate={handlePptPlanUpdate} />
 
             <div className="border-t border-gray-200 bg-gray-50">
               <div className="w-full max-w-3xl mx-auto px-4 py-4">
-                <ChatInput
-                  status={status}
-                  onSubmit={handleSendMessage}
-                  stop={stop}
-                  isCentered={false}
-                />
+                <ChatInput status={status} onSubmit={handleSendMessage} stop={stop} isCentered={false} />
               </div>
             </div>
           </>
@@ -427,105 +418,131 @@ function ChatInterface({
   );
 }
 
-// --- Main Page Component ---
-
 export default function ChatPage() {
-  const [chats, setChats] = useState<ChatSession[]>([]);
-  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
-  const [initialMessages, setInitialMessages] = useState<any[]>([]);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [currentProject, setCurrentProject] = useState<ProjectRecord | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isCreatingProject, setIsCreatingProject] = useState(false);
 
-  const loadChats = useCallback(async () => {
-    const data = await fetchChats();
-    setChats(data);
+  const loadProjects = useCallback(async () => {
+    const data = await listProjects();
+    setProjects(data);
     setLoading(false);
+    return data;
+  }, []);
+
+  const refreshCurrentProject = useCallback(async (projectId: string) => {
+    const project = await getProject(projectId);
+    setCurrentProject(project);
   }, []);
 
   useEffect(() => {
-    loadChats();
-  }, [loadChats]);
+    void loadProjects();
+  }, [loadProjects]);
 
-  const [currentPptPlan, setCurrentPptPlan] = useState<{ slides: Slide[] } | undefined>();
+  const handleSelectProject = useCallback(
+    async (id: string) => {
+      if (id === currentProject?.id) return;
+      await refreshCurrentProject(id);
+    },
+    [currentProject?.id, refreshCurrentProject],
+  );
 
-  const handleSelectChat = async (id: string) => {
-    // If selecting same chat, do nothing (optional optimization)
-    if (id === currentChatId) return;
-
-    // Reset messages first to avoid flash of old content
-    setInitialMessages([]); 
-    setCurrentPptPlan(undefined);
-    setCurrentChatId(id);
-
-    const chat = await fetchChat(id);
-    if (chat) {
-      setInitialMessages(chat.messages || []);
-      setCurrentPptPlan(chat.pptPlan);
+  const handleNewProject = useCallback(async () => {
+    if (isCreatingProject) return;
+    setIsCreatingProject(true);
+    try {
+      const projectId = await createProject({ name: DEFAULT_PROJECT_TITLE });
+      await loadProjects();
+      await refreshCurrentProject(projectId);
+    } finally {
+      setIsCreatingProject(false);
     }
-  };
+  }, [isCreatingProject, loadProjects, refreshCurrentProject]);
 
-  const handleNewChat = () => {
-    const newId = uuidv4();
-    setCurrentChatId(newId);
-    setInitialMessages([]);
-    setCurrentPptPlan(undefined);
-  };
-
-  const handleDeleteChat = async (id: string) => {
-    await deleteChatFromApi(id);
-    if (currentChatId === id) {
-        setCurrentChatId(null);
-        setInitialMessages([]);
-    }
-    await loadChats();
-  };
-
-  const handleRenameChat = async (id: string, newTitle: string) => {
-      // Optimistic update
-      setChats(prev => prev.map(c => c.id === id ? { ...c, title: newTitle } : c));
-      
-      await saveChatToApi({ id, title: newTitle });
-      await loadChats(); // Sync with server to be safe
-  };
-
-  const handleChatUpdate = useCallback(async (updatedChat: any) => {
-      if (updatedChat?.id) {
-        setChats(prev =>
-          prev.map(c => (c.id === updatedChat.id ? { ...c, ...updatedChat } : c)),
-        );
+  const handleDeleteProject = useCallback(
+    async (id: string) => {
+      await deleteProject(id);
+      if (currentProject?.id === id) {
+        setCurrentProject(null);
       }
-      await loadChats();
-  }, [loadChats]);
+      const nextProjects = await loadProjects();
+      if (currentProject?.id === id && nextProjects.length > 0) {
+        await refreshCurrentProject(nextProjects[0].id);
+      }
+    },
+    [currentProject?.id, loadProjects, refreshCurrentProject],
+  );
+
+  const handleRenameProject = useCallback(async (id: string, newTitle: string) => {
+    setProjects((prev) => prev.map((project) => (project.id === id ? { ...project, title: newTitle } : project)));
+    if (currentProject?.id === id) {
+      setCurrentProject({ ...currentProject, title: newTitle });
+    }
+    await renameProject(id, newTitle);
+    await loadProjects();
+  }, [currentProject, loadProjects]);
+
+  const handleProjectUpdate = useCallback(
+    async (updatedProject: Partial<ProjectRecord> & { id: string }) => {
+      setProjects((prev) =>
+        prev.map((project) =>
+          project.id === updatedProject.id
+            ? {
+                ...project,
+                title: updatedProject.title ?? project.title,
+                updatedAt: Date.now(),
+              }
+            : project,
+        ),
+      );
+
+      setCurrentProject((prev) => {
+        if (!prev || prev.id !== updatedProject.id) return prev;
+        return {
+          ...prev,
+          ...updatedProject,
+        };
+      });
+
+      await loadProjects();
+    },
+    [loadProjects],
+  );
 
   useEffect(() => {
-    if (!loading && !currentChatId && chats.length === 0) {
-        handleNewChat();
+    if (loading || currentProject || isCreatingProject) return;
+
+    if (projects.length > 0) {
+      void refreshCurrentProject(projects[0].id);
+      return;
     }
-  }, [loading, chats.length, currentChatId]);
+
+    void handleNewProject();
+  }, [currentProject, handleNewProject, isCreatingProject, loading, projects, refreshCurrentProject]);
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <Sidebar 
-        chats={chats} 
-        currentChatId={currentChatId} 
-        onSelect={handleSelectChat} 
-        onNew={handleNewChat}
-        onDelete={handleDeleteChat}
-        onRename={handleRenameChat}
+      <Sidebar
+        chats={projects.map((project) => ({
+          id: project.id,
+          title: project.title,
+          createdAt: project.createdAt,
+        }))}
+        currentChatId={currentProject?.id ?? null}
+        onSelect={handleSelectProject}
+        onNew={handleNewProject}
+        onDelete={handleDeleteProject}
+        onRename={handleRenameProject}
       />
-      
+
       <main className="flex-1 relative">
-        {currentChatId ? (
-            <ChatInterface 
-                key={currentChatId}
-                chatId={currentChatId}
-                initialMessages={initialMessages}
-                initialPptPlan={currentPptPlan}
-                onChatUpdate={handleChatUpdate}
-            />
+        {currentProject ? (
+          <ChatInterface key={currentProject.id} project={currentProject} onProjectUpdate={handleProjectUpdate} />
         ) : (
-            <div className="flex items-center justify-center h-full text-gray-400">
-                <Loader2 className="animate-spin mr-2" /> Loading...
-            </div>
+          <div className="flex items-center justify-center h-full text-gray-400">
+            <Loader2 className="animate-spin mr-2" /> Loading...
+          </div>
         )}
       </main>
     </div>

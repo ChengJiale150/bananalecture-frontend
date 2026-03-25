@@ -1,28 +1,4 @@
-import { Dialogue, PPTPlan, Slide } from '@/lib/chat-store';
-
-export interface StoredPreviewPlan {
-  projectId?: string;
-  slides: Slide[];
-}
-
-export async function fetchChat(id: string) {
-  const res = await fetch(`/api/history?id=${id}`, { cache: 'no-store' });
-  if (!res.ok) return null;
-  return res.json();
-}
-
-export async function saveChatToApi(chat: {
-  id: string;
-  title?: string;
-  messages?: any[];
-  pptPlan?: PPTPlan;
-}) {
-  await fetch('/api/history', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(chat),
-  });
-}
+import { Dialogue } from '@/lib/project-types';
 
 export function createClientId() {
   return typeof crypto !== 'undefined' && crypto.randomUUID

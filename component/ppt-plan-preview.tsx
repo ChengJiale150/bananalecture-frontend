@@ -1,8 +1,8 @@
 'use client';
 
 import { Sparkles, Maximize2, ChevronRight } from 'lucide-react';
-import { useState, useEffect, useMemo } from 'react';
-import type { Slide, SlideType } from '@/lib/chat-store';
+import { useState, useMemo } from 'react';
+import type { Slide, SlideType } from '@/lib/project-types';
 import dynamic from 'next/dynamic';
 
 // Lazy load the modal for better initial load performance
@@ -17,22 +17,6 @@ interface PPTPlanPreviewProps {
 
 export default function PPTPlanPreview({ pptPlan, onUpdate }: PPTPlanPreviewProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
-
-  // Auto-refresh PPT plan when tool completes (listen to event from ToolView)
-  useEffect(() => {
-    const handlePlanUpdate = (event: CustomEvent) => {
-      const slides = event.detail.slides;
-      if (slides && Array.isArray(slides)) {
-        console.log('Received ppt-plan-update event', slides);
-        onUpdate({ slides });
-      }
-    };
-
-    window.addEventListener('ppt-plan-update', handlePlanUpdate as EventListener);
-    return () => {
-      window.removeEventListener('ppt-plan-update', handlePlanUpdate as EventListener);
-    };
-  }, [onUpdate]);
 
   const slides = pptPlan?.slides || [];
   

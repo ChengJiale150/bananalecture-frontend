@@ -1,8 +1,6 @@
 import { tool } from 'ai';
 import { z } from 'zod';
-import { mutateChat } from '@/lib/chat-store-server';
-import type { Slide, SlideType as ChatStoreSlideType } from '@/lib/chat-store';
-import { v4 as uuidv4 } from 'uuid';
+import type { Slide } from '@/lib/project-types';
 
 export const SlideSchema = z.object({
   type: z.enum(['cover', 'introduction', 'content', 'summary', 'ending']).describe('Type of the slide'),
@@ -21,27 +19,25 @@ export function createPlannerTools(chatId: string) {
     }),
     async execute({ slides }) {
       if (!slides || slides.length === 0) {
-        return mutateChat(chatId, chat => ({
+        return {
           result: 'PPT Plan Cleared.',
-          chat: { ...chat, pptPlan: undefined },
-        }));
+          slides: [],
+          projectId: chatId,
+        };
       }
 
-      return mutateChat(chatId, chat => {
-        const validatedSlides: Slide[] = slides.map(slide => ({
-          id: uuidv4(),
-          type: slide.type as ChatStoreSlideType,
+      const validatedSlides: Omit<Slide, 'id'>[] = slides.map((slide) => ({
+          type: slide.type,
           title: slide.title,
           description: slide.description,
           content: slide.content,
-        }));
+      }));
 
-        return { 
-          result: 'PPT Plan Created Successfully!', 
-          slides: validatedSlides,
-          chat: { ...chat, pptPlan: { slides: validatedSlides } } 
-        };
-      });
+      return {
+        result: 'PPT Plan Created Successfully!',
+        slides: validatedSlides,
+        projectId: chatId,
+      };
     },
   });
 

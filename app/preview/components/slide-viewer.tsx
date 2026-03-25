@@ -1,20 +1,26 @@
-import { Slide } from '@/lib/chat-store';
+import { Slide } from '@/lib/project-types';
 import { FileText, Image as ImageIcon, Edit2, Volume2, Play } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 interface SlideViewerProps {
   currentSlide: Slide;
-  status: string;
   isGeneratingAll: boolean;
   handleGenerateDialogues: () => void;
+  handleGenerateImage: () => void;
+  handleGenerateAudio: () => void;
+  handleOpenSlideAudio: () => void;
+  handleOpenSlideImage: () => void;
 }
 
 export function SlideViewer({
   currentSlide,
-  status,
   isGeneratingAll,
   handleGenerateDialogues,
+  handleGenerateImage,
+  handleGenerateAudio,
+  handleOpenSlideAudio,
+  handleOpenSlideImage,
 }: SlideViewerProps) {
   return (
     <div className="flex-1 p-6 flex flex-col gap-6 overflow-y-auto border-r-2 border-gray-200">
@@ -33,39 +39,54 @@ export function SlideViewer({
             </div>
           </div>
         )}
+        {currentSlide.imagePath && (
+          <button
+            onClick={handleOpenSlideImage}
+            className="mt-6 px-4 py-2 bg-white text-[var(--doraemon-blue)] border-2 border-[var(--doraemon-blue)] rounded-xl font-bold hover:bg-blue-50 transition-colors"
+          >
+            查看已生成图片
+          </button>
+        )}
       </div>
       
       <div className="flex justify-center gap-4 flex-wrap">
         <button
           onClick={handleGenerateDialogues}
-          disabled={status === 'streaming' || status === 'submitted' || isGeneratingAll}
+          disabled={isGeneratingAll}
           className={`flex items-center gap-2 px-6 py-3 font-bold rounded-full border-2 transition-all ${
-            status === 'streaming' || status === 'submitted' || isGeneratingAll
+            isGeneratingAll
               ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
               : 'bg-white text-[var(--doraemon-blue)] border-[var(--doraemon-blue)] hover:bg-blue-50'
           }`}
         >
           <FileText size={18} />
-          {status === 'streaming' || status === 'submitted' 
-            ? '生成中...' 
-            : isGeneratingAll 
-              ? '批量生成中...' 
-              : '生成口播稿'
-          }
+          {isGeneratingAll ? '批量生成中...' : '生成口播稿'}
         </button>
-        <button className="flex items-center gap-2 px-6 py-3 bg-[var(--doraemon-blue)] text-white font-bold rounded-full border-2 border-[var(--doraemon-blue)] hover:brightness-110 transition-all">
+        <button
+          onClick={handleGenerateImage}
+          className="flex items-center gap-2 px-6 py-3 bg-[var(--doraemon-blue)] text-white font-bold rounded-full border-2 border-[var(--doraemon-blue)] hover:brightness-110 transition-all"
+        >
           <ImageIcon size={18} />
           生成图片
         </button>
-        <button className="flex items-center gap-2 px-6 py-3 bg-white text-[var(--doraemon-blue)] font-bold rounded-full border-2 border-[var(--doraemon-blue)] hover:bg-blue-50 transition-all">
+        <button
+          onClick={handleOpenSlideImage}
+          className="flex items-center gap-2 px-6 py-3 bg-white text-[var(--doraemon-blue)] font-bold rounded-full border-2 border-[var(--doraemon-blue)] hover:bg-blue-50 transition-all"
+        >
           <Edit2 size={18} />
-          修改图片
+          查看图片
         </button>
-        <button className="flex items-center gap-2 px-6 py-3 bg-white text-[var(--doraemon-blue)] font-bold rounded-full border-2 border-[var(--doraemon-blue)] hover:bg-blue-50 transition-all">
+        <button
+          onClick={handleGenerateAudio}
+          className="flex items-center gap-2 px-6 py-3 bg-white text-[var(--doraemon-blue)] font-bold rounded-full border-2 border-[var(--doraemon-blue)] hover:bg-blue-50 transition-all"
+        >
           <Volume2 size={18} />
           生成音频
         </button>
-        <button className="flex items-center gap-2 px-6 py-3 bg-white text-[var(--doraemon-blue)] font-bold rounded-full border-2 border-[var(--doraemon-blue)] hover:bg-blue-50 transition-all">
+        <button
+          onClick={handleOpenSlideAudio}
+          className="flex items-center gap-2 px-6 py-3 bg-white text-[var(--doraemon-blue)] font-bold rounded-full border-2 border-[var(--doraemon-blue)] hover:bg-blue-50 transition-all"
+        >
           <Play size={18} />
           播放音频
         </button>

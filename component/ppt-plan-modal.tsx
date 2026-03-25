@@ -4,8 +4,8 @@ import { X, Sparkles, BookOpen, Lightbulb, FileText, Star, Edit2, Save, Trash2, 
 import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { Slide, SlideType } from '@/lib/chat-store';
-import { moveSlideUp, moveSlideDown } from '@/lib/chat-store';
+import type { Slide, SlideType } from '@/lib/project-types';
+import { moveSlideUp, moveSlideDown } from '@/lib/project-types';
 
 interface PPTPlanModalProps {
   pptPlan: { slides: Slide[] };

@@ -1,7 +1,7 @@
 import { createPlannerTools } from '@/agent/planner/tools';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { ToolLoopAgent, InferAgentUIMessage } from 'ai';
-import type { PPTPlan } from '@/lib/chat-store';
+import type { PPTPlan } from '@/lib/project-types';
 
 const kimiClient = createOpenAICompatible({
   name: 'kimi',

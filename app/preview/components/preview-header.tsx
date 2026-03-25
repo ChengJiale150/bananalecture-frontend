@@ -1,15 +1,21 @@
 import { ArrowLeft, Sparkles, Video, Settings, ChevronDown, FileText, Image as ImageIcon, Volume2, ExternalLink, RefreshCw, Square } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { PPTPlan } from '@/lib/chat-store';
+import { PPTPlan } from '@/lib/project-types';
+import type { TaskProgress } from '@/lib/project-types';
 
 interface PreviewHeaderProps {
   plan: PPTPlan | null;
   currentSlideIndex: number;
   isGeneratingAll: boolean;
   generationProgress: { current: number; total: number; failed: number };
+  activeTask: TaskProgress | null;
   handleStopGeneration: () => void;
   handleGenerateAllDialogues: () => void;
+  handleGenerateAllImages: () => void;
+  handleGenerateAllAudio: () => void;
+  handleGenerateVideo: () => void;
+  handleOpenVideo: () => void;
   handleForceRefresh: () => void;
 }
 
@@ -18,12 +24,18 @@ export function PreviewHeader({
   currentSlideIndex,
   isGeneratingAll,
   generationProgress,
+  activeTask,
   handleStopGeneration,
   handleGenerateAllDialogues,
+  handleGenerateAllImages,
+  handleGenerateAllAudio,
+  handleGenerateVideo,
+  handleOpenVideo,
   handleForceRefresh,
 }: PreviewHeaderProps) {
   const router = useRouter();
   const [showAdvancedTools, setShowAdvancedTools] = useState(false);
+  const isTaskRunning = Boolean(activeTask && ['pending', 'running'].includes(activeTask.status));
 
   return (
     <header className="bg-white border-b-4 border-gray-900 shadow-sm flex-none z-10 relative">
@@ -43,9 +55,12 @@ export function PreviewHeader({
             className="flex items-center gap-2 px-6 py-2 bg-[var(--doraemon-blue)] text-white font-black rounded-full border-2 border-gray-900 hover:brightness-110 transition-all shadow-[3px_3px_0px_rgba(0,0,0,1)]"
           >
             <Sparkles size={18} />
-            一键生成
+            {isTaskRunning ? '任务进行中' : '一键生成'}
           </button>
-          <button className="flex items-center gap-2 px-6 py-2 bg-white text-orange-500 font-bold rounded-full border-2 border-orange-500 hover:bg-orange-50 transition-all">
+          <button
+            onClick={handleGenerateVideo}
+            className="flex items-center gap-2 px-6 py-2 bg-white text-orange-500 font-bold rounded-full border-2 border-orange-500 hover:bg-orange-50 transition-all"
+          >
             <Video size={18} />
             导出视频
           </button>
@@ -72,17 +87,35 @@ export function PreviewHeader({
                   <FileText size={16} />
                   一键生成口播稿
                 </button>
-                <button className="w-full flex items-center gap-2 px-4 py-3 text-[var(--doraemon-blue)] hover:bg-blue-50 border-b border-gray-100">
+                <button
+                  onClick={() => {
+                    handleGenerateAllImages();
+                    setShowAdvancedTools(false);
+                  }}
+                  className="w-full flex items-center gap-2 px-4 py-3 text-[var(--doraemon-blue)] hover:bg-blue-50 border-b border-gray-100"
+                >
                   <ImageIcon size={16} />
                   一键生成图片
                 </button>
-                <button className="w-full flex items-center gap-2 px-4 py-3 text-[var(--doraemon-blue)] hover:bg-blue-50 border-b border-gray-100">
+                <button
+                  onClick={() => {
+                    handleGenerateAllAudio();
+                    setShowAdvancedTools(false);
+                  }}
+                  className="w-full flex items-center gap-2 px-4 py-3 text-[var(--doraemon-blue)] hover:bg-blue-50 border-b border-gray-100"
+                >
                   <Volume2 size={16} />
                   一键生成音频
                 </button>
-                <button className="w-full flex items-center gap-2 px-4 py-3 text-[var(--doraemon-blue)] hover:bg-blue-50">
+                <button
+                  onClick={() => {
+                    handleOpenVideo();
+                    setShowAdvancedTools(false);
+                  }}
+                  className="w-full flex items-center gap-2 px-4 py-3 text-[var(--doraemon-blue)] hover:bg-blue-50"
+                >
                   <ExternalLink size={16} />
-                  导出视频
+                  打开视频
                 </button>
               </div>
             )}
@@ -127,6 +160,11 @@ export function PreviewHeader({
               <Square size={14} fill="currentColor" />
               停止
             </button>
+          )}
+          {activeTask && (
+            <span className="text-xs text-gray-500">
+              {activeTask.type}: {activeTask.status}
+            </span>
           )}
         </div>
       </div>

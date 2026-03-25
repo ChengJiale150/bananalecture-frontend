@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Dialogue, DIALOGUE_ROLES, DIALOGUE_EMOTIONS, DIALOGUE_SPEEDS } from '@/lib/chat-store';
+import { Dialogue, DIALOGUE_ROLES, DIALOGUE_EMOTIONS, DIALOGUE_SPEEDS } from '@/lib/project-types';
 import { Play, Trash2, ChevronUp, ChevronDown, Plus, Save, X } from 'lucide-react';
 import { getEmotionDisplay, getSpeedDisplay } from '../utils';
 
