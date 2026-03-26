@@ -25,11 +25,21 @@ export interface BananaLectureApiClientOptions {
   fetch?: typeof fetch;
 }
 
-function buildUrl(baseUrl: string, path: string, query?: QueryParams) {
+function isAbsoluteUrl(value: string) {
+  return value.startsWith('http://') || value.startsWith('https://');
+}
+
+function joinUrl(baseUrl: string, path: string) {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-  const url = baseUrl.startsWith('http://') || baseUrl.startsWith('https://')
-    ? new URL(`${baseUrl}${normalizedPath}`)
-    : new URL(`${baseUrl}${normalizedPath}`, 'http://localhost');
+  const normalizedBaseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+  return `${normalizedBaseUrl}${normalizedPath}`;
+}
+
+function buildUrl(baseUrl: string, path: string, query?: QueryParams) {
+  const joinedUrl = joinUrl(baseUrl, path);
+  const url = isAbsoluteUrl(baseUrl)
+    ? new URL(joinedUrl)
+    : new URL(joinedUrl, 'http://bananalecture.local');
 
   if (query) {
     for (const [key, value] of Object.entries(query)) {
@@ -72,7 +82,11 @@ export function createBananaLectureRequester(options: BananaLectureApiClientOpti
       finalHeaders.set('Content-Type', 'application/json');
     }
 
-    return fetchImpl(buildUrl(baseUrl, path, query), {
+    const requestTarget = isAbsoluteUrl(baseUrl)
+      ? buildUrl(baseUrl, path, query)
+      : buildFileUrl(path, query);
+
+    return fetchImpl(requestTarget, {
       ...rest,
       headers: finalHeaders,
       body: normalizedBody,
@@ -109,7 +123,12 @@ export function createBananaLectureRequester(options: BananaLectureApiClientOpti
   }
 
   function buildFileUrl(path: string, query?: QueryParams) {
-    return buildUrl(baseUrl, path, query).toString().replace('http://localhost', '');
+    if (isAbsoluteUrl(baseUrl)) {
+      return buildUrl(baseUrl, path, query).toString();
+    }
+
+    const url = buildUrl(baseUrl, path, query);
+    return `${url.pathname}${url.search}`;
   }
 
   return {
