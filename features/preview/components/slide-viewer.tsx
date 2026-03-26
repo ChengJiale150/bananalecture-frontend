@@ -70,14 +70,14 @@ export function SlideViewer({
         <p className="text-xl text-gray-700 text-center max-w-2xl mx-auto">{currentSlide.description}</p>
 
         <div className="mt-8 flex-1 flex flex-col">
-          {currentSlide.imagePath ? (
+          {currentSlide.imagePath && slideImageUrl ? (
             <button
               onClick={handleOpenSlideImage}
               className="flex-1 min-h-[360px] rounded-3xl overflow-hidden border-2 border-gray-900 bg-[#F7FBFF] shadow-[4px_4px_0px_rgba(0,0,0,1)] hover:translate-x-[-1px] hover:translate-y-[-1px] transition-transform"
               title="查看原图"
             >
               <img
-                src={slideImageUrl ?? currentSlide.imagePath}
+                src={slideImageUrl}
                 alt={currentSlide.title}
                 className="h-full w-full object-contain bg-[radial-gradient(circle_at_top,#ffffff,#dbeafe)]"
               />

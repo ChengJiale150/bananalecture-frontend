@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 test('listProjects requests paginated data and maps pagination fields', async () => {
+  const createdAt = '2026-03-26T10:00:00Z';
+  const updatedAt = '2026-03-26T10:05:00Z';
   const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
   const originalFetch = globalThis.fetch;
 
@@ -17,8 +19,8 @@ test('listProjects requests paginated data and maps pagination fields', async ()
             {
               id: 'project-1',
               name: 'Project 1',
-              created_at: 1,
-              updated_at: 2,
+              created_at: createdAt,
+              updated_at: updatedAt,
             },
           ],
           pagination: {
@@ -55,8 +57,8 @@ test('listProjects requests paginated data and maps pagination fields', async ()
         {
           id: 'project-1',
           title: 'Project 1',
-          createdAt: 1,
-          updatedAt: 2,
+          createdAt: Date.parse(createdAt),
+          updatedAt: Date.parse(updatedAt),
         },
       ],
       pagination: {
@@ -64,6 +66,108 @@ test('listProjects requests paginated data and maps pagination fields', async ()
         pageSize: 10,
         total: 23,
         totalPages: 3,
+      },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('getProject maps ISO timestamps to numbers, preserves storage keys, and sorts slides by idx', async () => {
+  const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({ input, init });
+
+    return new Response(
+      JSON.stringify({
+        code: 200,
+        message: 'success',
+        data: {
+          id: 'project-1',
+          user_id: 'admin',
+          name: 'Project 1',
+          messages: '[]',
+          video_path: 'projects/project-1/video/final.mp4',
+          created_at: '2026-03-26T10:00:00Z',
+          updated_at: '2026-03-26T10:05:00Z',
+          slides: [
+            {
+              id: 'slide-2',
+              project_id: 'project-1',
+              type: 'content',
+              title: '第二页',
+              description: '第二页描述',
+              content: '第二页内容',
+              idx: 2,
+              image_path: 'projects/project-1/slides/slide-2/image/original.png',
+              audio_path: null,
+              created_at: '2026-03-26T10:02:00Z',
+              updated_at: '2026-03-26T10:06:00Z',
+            },
+            {
+              id: 'slide-1',
+              project_id: 'project-1',
+              type: 'cover',
+              title: '第一页',
+              description: '第一页描述',
+              content: '第一页内容',
+              idx: 1,
+              image_path: null,
+              audio_path: 'projects/project-1/slides/slide-1/audio/merged.mp3',
+              created_at: '2026-03-26T10:01:00Z',
+              updated_at: '2026-03-26T10:03:00Z',
+            },
+          ],
+        },
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+  }) as typeof fetch;
+
+  try {
+    const { getProject } = await import('@/features/projects/api');
+    const result = await getProject('project-1');
+
+    assert.equal(calls.length, 1);
+    assert.equal((calls[0].init?.method ?? 'GET').toUpperCase(), 'GET');
+    assert.match(String(calls[0].input), /\/api\/v1\/projects\/project-1/);
+
+    assert.deepEqual(result, {
+      id: 'project-1',
+      userId: 'admin',
+      title: 'Project 1',
+      createdAt: Date.parse('2026-03-26T10:00:00Z'),
+      updatedAt: Date.parse('2026-03-26T10:05:00Z'),
+      messages: [],
+      videoPath: 'projects/project-1/video/final.mp4',
+      pptPlan: {
+        slides: [
+          {
+            id: 'slide-1',
+            type: 'cover',
+            title: '第一页',
+            description: '第一页描述',
+            content: '第一页内容',
+            imagePath: undefined,
+            audioPath: 'projects/project-1/slides/slide-1/audio/merged.mp3',
+            dialogues: undefined,
+          },
+          {
+            id: 'slide-2',
+            type: 'content',
+            title: '第二页',
+            description: '第二页描述',
+            content: '第二页内容',
+            imagePath: 'projects/project-1/slides/slide-2/image/original.png',
+            audioPath: undefined,
+            dialogues: undefined,
+          },
+        ],
       },
     });
   } finally {

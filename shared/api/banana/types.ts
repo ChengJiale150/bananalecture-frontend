@@ -40,16 +40,17 @@ export interface ProjectDTO {
   user_id: string;
   name: string;
   messages: string | null;
+  // Storage keys are not direct browser URLs. Use the proxied file endpoints instead.
   video_path: string | null;
-  created_at: number;
-  updated_at: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ProjectListItemDTO {
   id: string;
   name: string;
-  created_at: number;
-  updated_at: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface SlideDTO {
@@ -60,10 +61,12 @@ export interface SlideDTO {
   description: string;
   content: string | null;
   idx: number;
+  // Storage keys are not direct browser URLs. Use the proxied file endpoints instead.
   image_path: string | null;
+  // Storage keys are not direct browser URLs. Use the proxied file endpoints instead.
   audio_path: string | null;
-  created_at: number;
-  updated_at: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface DialogueDTO {
@@ -74,9 +77,10 @@ export interface DialogueDTO {
   emotion: DialogueEmotion | string;
   speed: DialogueSpeed | string;
   idx: number;
+  // Storage keys are not direct browser URLs. Use the proxied file endpoints instead.
   audio_path: string | null;
-  created_at: number;
-  updated_at: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface TaskDTO {

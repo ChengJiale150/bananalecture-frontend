@@ -39,6 +39,11 @@ function getApiClient() {
   return createBananaLectureApiClient();
 }
 
+function parseApiTimestamp(value: string): number {
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
 function toDialogueRole(role: string): DialogueRole {
   return role as DialogueRole;
 }
@@ -79,8 +84,8 @@ function mapProjectSummary(dto: ProjectListItemDTO): ProjectSummary {
   return {
     id: dto.id,
     title: dto.name,
-    createdAt: dto.created_at,
-    updatedAt: dto.updated_at,
+    createdAt: parseApiTimestamp(dto.created_at),
+    updatedAt: parseApiTimestamp(dto.updated_at),
   };
 }
 
@@ -89,8 +94,8 @@ function mapProjectRecord(dto: ProjectDetailDTO): ProjectRecord {
     id: dto.id,
     userId: dto.user_id,
     title: dto.name,
-    createdAt: dto.created_at,
-    updatedAt: dto.updated_at,
+    createdAt: parseApiTimestamp(dto.created_at),
+    updatedAt: parseApiTimestamp(dto.updated_at),
     messages: safeParseProjectMessages(dto.messages),
     videoPath: dto.video_path ?? undefined,
     pptPlan: dto.slides.length > 0 ? { slides: dto.slides.sort((a, b) => a.idx - b.idx).map((slide) => mapSlide(slide)) } : undefined,
