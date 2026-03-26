@@ -40,8 +40,8 @@ POST /api/v1/projects/{project_id}/slides/{slide_id}/dialogues/generate
         "speed": "中速",
         "idx": 1,
         "audio_path": null,
-        "created_at": 1711209600000,
-        "updated_at": 1711209600000
+        "created_at": "2026-03-26T10:00:00Z",
+        "updated_at": "2026-03-26T10:00:00Z"
       },
       {
         "id": "dialogue-002",
@@ -52,8 +52,8 @@ POST /api/v1/projects/{project_id}/slides/{slide_id}/dialogues/generate
         "speed": "中速",
         "idx": 2,
         "audio_path": null,
-        "created_at": 1711209600000,
-        "updated_at": 1711209600000
+        "created_at": "2026-03-26T10:00:00Z",
+        "updated_at": "2026-03-26T10:00:00Z"
       }
     ]
   }
@@ -124,13 +124,13 @@ POST /api/v1/projects/{project_id}/slides/{slide_id}/dialogues/add
     "speed": "中速",
     "idx": 3,
     "audio_path": null,
-    "created_at": 1711209600000,
-    "updated_at": 1711209600000
+    "created_at": "2026-03-26T10:00:00Z",
+    "updated_at": "2026-03-26T10:00:00Z"
   }
 }
 ```
 
-**说明**: 新对话会自动添加到列表末尾，对话的 `audio_path` 初始值为 null
+**说明**: 新对话会自动添加到列表末尾，对话的 `audio_path` 初始值为 null，`created_at` 和 `updated_at` 为 UTC ISO 8601 时间字符串
 
 ### 获取对话列表
 
@@ -155,8 +155,8 @@ GET /api/v1/projects/{project_id}/slides/{slide_id}/dialogues
         "speed": "中速",
         "idx": 1,
         "audio_path": null,
-        "created_at": 1711209600000,
-        "updated_at": 1711209600000
+        "created_at": "2026-03-26T10:00:00Z",
+        "updated_at": "2026-03-26T10:00:00Z"
       }
     ],
     "total": 2
@@ -198,8 +198,8 @@ PUT /api/v1/projects/{project_id}/slides/{slide_id}/dialogues/{dialogue_id}
     "speed": "快速",
     "idx": 1,
     "audio_path": null,
-    "created_at": 1711209600000,
-    "updated_at": 1711209700000
+    "created_at": "2026-03-26T10:00:00Z",
+    "updated_at": "2026-03-26T10:05:00Z"
   }
 }
 ```

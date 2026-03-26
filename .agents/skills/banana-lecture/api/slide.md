@@ -68,8 +68,8 @@ POST /api/v1/projects/{project_id}/slides
         "idx": 1,
         "image_path": null,
         "audio_path": null,
-        "created_at": 1711209600000,
-        "updated_at": 1711209600000
+        "created_at": "2026-03-26T10:00:00Z",
+        "updated_at": "2026-03-26T10:00:00Z"
       }
     ]
   }
@@ -81,6 +81,7 @@ POST /api/v1/projects/{project_id}/slides
 - 该接口会先删除项目下所有已有的幻灯片，然后创建新的幻灯片列表
 - 每个幻灯片会自动分配唯一的ID，并按照数组顺序设置 `idx` 索引
 - 幻灯片的 `image_path` 和 `audio_path` 初始值为 null，后续可通过图片生成和音频生成接口更新
+- `created_at` 和 `updated_at` 均为 UTC ISO 8601 时间字符串
 
 ### 获取幻灯片列表
 
@@ -104,10 +105,10 @@ GET /api/v1/projects/{project_id}/slides
         "description": "欢迎观看",
         "content": "这是一个介绍性页面",
         "idx": 1,
-        "image_path": "/uploads/projects/550e8400/images/01.png",
+        "image_path": "projects/550e8400-e29b-41d4-a716-446655440000/slides/slide-001/image/original.png",
         "audio_path": null,
-        "created_at": 1711209600000,
-        "updated_at": 1711209600000
+        "created_at": "2026-03-26T10:00:00Z",
+        "updated_at": "2026-03-26T10:00:00Z"
       }
     ]
   }
@@ -147,10 +148,10 @@ PUT /api/v1/projects/{project_id}/slides/{slide_id}
     "description": "新的描述",
     "content": "新的内容",
     "idx": 2,
-    "image_path": "/uploads/projects/550e8400/images/02.png",
+    "image_path": "projects/550e8400-e29b-41d4-a716-446655440000/slides/slide-002/image/original.png",
     "audio_path": null,
-    "created_at": 1711209600000,
-    "updated_at": 1711209700000
+    "created_at": "2026-03-26T10:00:00Z",
+    "updated_at": "2026-03-26T10:05:00Z"
   }
 }
 ```
@@ -236,8 +237,8 @@ POST /api/v1/projects/{project_id}/slides/add
     "idx": 3,
     "image_path": null,
     "audio_path": null,
-    "created_at": 1711209600000,
-    "updated_at": 1711209600000
+    "created_at": "2026-03-26T10:00:00Z",
+    "updated_at": "2026-03-26T10:00:00Z"
   }
 }
 ```

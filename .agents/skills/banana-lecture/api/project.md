@@ -46,8 +46,8 @@ POST /api/v1/projects
     "name": "我的PPT讲解视频",
     "messages": null,
     "video_path": null,
-    "created_at": 1711209600000,
-    "updated_at": 1711209600000
+    "created_at": "2026-03-26T10:00:00Z",
+    "updated_at": "2026-03-26T10:00:00Z"
   }
 }
 ```
@@ -85,8 +85,8 @@ GET /api/v1/{user_id}/projects
       {
         "id": "550e8400-e29b-41d4-a716-446655440000",
         "name": "我的PPT讲解视频",
-        "created_at": 1711209600000,
-        "updated_at": 1711209600000
+        "created_at": "2026-03-26T10:00:00Z",
+        "updated_at": "2026-03-26T10:00:00Z"
       }
     ],
     "pagination": {
@@ -119,8 +119,8 @@ GET /api/v1/projects/{project_id}
     "name": "我的PPT讲解视频",
     "messages": "[]",
     "video_path": null,
-    "created_at": 1711209600000,
-    "updated_at": 1711209600000,
+    "created_at": "2026-03-26T10:00:00Z",
+    "updated_at": "2026-03-26T10:00:00Z",
     "slides": [
       {
         "id": "slide-001",
@@ -130,10 +130,10 @@ GET /api/v1/projects/{project_id}
         "description": "欢迎观看",
         "content": "这是一个介绍性页面",
         "idx": 1,
-        "image_path": "/uploads/projects/550e8400/images/01.png",
+        "image_path": "projects/550e8400-e29b-41d4-a716-446655440000/slides/slide-001/image/original.png",
         "audio_path": null,
-        "created_at": 1711209600000,
-        "updated_at": 1711209600000
+        "created_at": "2026-03-26T10:00:00Z",
+        "updated_at": "2026-03-26T10:00:00Z"
       }
     ]
   }
@@ -172,7 +172,7 @@ PUT /api/v1/projects/{project_id}
     "id": "550e8400-e29b-41d4-a716-446655440000",
     "name": "新的项目名称",
     "messages": "[]",
-    "updated_at": 1711209700000
+    "updated_at": "2026-03-26T10:05:00Z"
   }
 }
 ```
@@ -181,6 +181,7 @@ PUT /api/v1/projects/{project_id}
 
 - `name` 和 `messages` 字段至少需要提供一个
 - `messages` 字段用于存储项目的对话历史，格式为 JSON 数组
+- `created_at` 和 `updated_at` 均为 UTC ISO 8601 时间字符串
 
 ### 删除项目
 
@@ -203,4 +204,4 @@ DELETE /api/v1/projects/{project_id}
 **说明**
 
 - 删除项目时会级联删除关联的幻灯片和对话
-- 删除项目时会删除关联的所有文件（图片、音频、视频）
+- 删除项目时不会自动清理磁盘中的历史生成文件；接口保证数据库资源与当前 API 行为一致
