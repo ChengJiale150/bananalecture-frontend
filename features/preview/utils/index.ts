@@ -44,3 +44,34 @@ export function normalizeDialogues(dialogues: any[]): Dialogue[] {
     audioPath: dialogue?.audioPath,
   }));
 }
+
+export function reorderDialoguesLocally(
+  dialogues: Dialogue[],
+  dialogueId: string,
+  direction: -1 | 1,
+) {
+  const index = dialogues.findIndex((dialogue) => dialogue.id === dialogueId);
+  const targetIndex = index + direction;
+  if (index < 0 || targetIndex < 0 || targetIndex >= dialogues.length) {
+    return dialogues;
+  }
+
+  const next = [...dialogues];
+  const current = next[index];
+  next[index] = next[targetIndex];
+  next[targetIndex] = current;
+  return next;
+}
+
+export function upsertDialogue(dialogues: Dialogue[], nextDialogue: Dialogue) {
+  const index = dialogues.findIndex((dialogue) => dialogue.id === nextDialogue.id);
+  if (index < 0) {
+    return [...dialogues, nextDialogue];
+  }
+
+  return dialogues.map((dialogue) => (dialogue.id === nextDialogue.id ? nextDialogue : dialogue));
+}
+
+export function removeDialogueById(dialogues: Dialogue[], dialogueId: string) {
+  return dialogues.filter((dialogue) => dialogue.id !== dialogueId);
+}

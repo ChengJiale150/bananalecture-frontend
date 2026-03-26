@@ -327,6 +327,11 @@ export function getSlideAudioUrl(projectId: string, slideId: string) {
   return apiClient.getSlideAudioFileUrl(projectId, slideId);
 }
 
+export function getDialogueAudioUrl(projectId: string, slideId: string, dialogueId: string) {
+  const apiClient = getApiClient();
+  return apiClient.getDialogueAudioFileUrl(projectId, slideId, dialogueId);
+}
+
 export function getVideoUrl(projectId: string) {
   const apiClient = getApiClient();
   return apiClient.getVideoFileUrl(projectId);

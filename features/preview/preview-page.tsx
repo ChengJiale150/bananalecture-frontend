@@ -21,22 +21,32 @@ function PreviewContent() {
     setCurrentSlideIndex,
     isLoading,
     isGeneratingAll,
-    isSavingDialogues,
+    isDialogueActionPending,
     generationSession,
     overallGenerationProgress,
     currentStageTaskProgress,
     currentSlide,
     displayDialogues,
+    currentSlideImageUrl,
+    isGeneratingImage,
+    isModifyingImage,
+    isGeneratingDialogues,
+    isGeneratingAudio,
     handleGenerateDialogues,
     handleGenerateAll,
     handleStartStageGeneration,
     handleStopGeneration,
     handleForceRefresh,
-    handleSaveManualDialogues,
+    handleAddDialogue,
+    handleUpdateDialogue,
+    handleDeleteDialogue,
+    handleMoveDialogue,
     handleGenerateImage,
+    handleModifyImage,
     handleGenerateAudio,
     handleOpenSlideAudio,
     handleOpenSlideImage,
+    handleOpenDialogueAudio,
     handleDownloadVideo,
     projectVideoPath,
   } = usePreviewState(projectIdFromUrl, pageFromUrl);
@@ -77,16 +87,26 @@ function PreviewContent() {
           <SlideViewer 
             currentSlide={currentSlide}
             isGeneratingAll={isGeneratingAll}
+            isGeneratingImage={isGeneratingImage}
+            isModifyingImage={isModifyingImage}
+            isGeneratingDialogues={isGeneratingDialogues}
+            isGeneratingAudio={isGeneratingAudio}
             handleGenerateDialogues={handleGenerateDialogues}
             handleGenerateImage={handleGenerateImage}
+            handleModifyImage={handleModifyImage}
             handleGenerateAudio={handleGenerateAudio}
             handleOpenSlideAudio={handleOpenSlideAudio}
             handleOpenSlideImage={handleOpenSlideImage}
+            slideImageUrl={currentSlideImageUrl}
           />
           <DialogueList
             dialogues={displayDialogues}
-            isSaving={isSavingDialogues}
-            onSave={handleSaveManualDialogues}
+            isBusy={isDialogueActionPending}
+            onAdd={handleAddDialogue}
+            onUpdate={handleUpdateDialogue}
+            onDelete={handleDeleteDialogue}
+            onMove={handleMoveDialogue}
+            onPlayAudio={handleOpenDialogueAudio}
           />
         </div>
       ) : (

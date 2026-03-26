@@ -12,10 +12,19 @@ const PPTPlanModal = dynamic(() => import('./ppt-plan-modal'), {
 
 interface PPTPlanPreviewProps {
   pptPlan: { slides: Slide[] } | undefined;
-  onUpdate: (plan: { slides: Slide[] }) => Promise<void> | void;
+  onUpdateSlide: (slide: Slide) => Promise<Slide | null>;
+  onAddSlide: (slide: Slide) => Promise<Slide | null>;
+  onDeleteSlide: (slideId: string) => Promise<boolean>;
+  onReorderSlides: (slideIds: string[]) => Promise<boolean>;
 }
 
-export default function PPTPlanPreview({ pptPlan, onUpdate }: PPTPlanPreviewProps) {
+export default function PPTPlanPreview({
+  pptPlan,
+  onUpdateSlide,
+  onAddSlide,
+  onDeleteSlide,
+  onReorderSlides,
+}: PPTPlanPreviewProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const slides = pptPlan?.slides || [];
@@ -75,7 +84,10 @@ export default function PPTPlanPreview({ pptPlan, onUpdate }: PPTPlanPreviewProp
       {isModalOpen && (
         <PPTPlanModal
           pptPlan={pptPlan}
-          onUpdate={onUpdate}
+          onUpdateSlide={onUpdateSlide}
+          onAddSlide={onAddSlide}
+          onDeleteSlide={onDeleteSlide}
+          onReorderSlides={onReorderSlides}
           onClose={() => setIsModalOpen(false)}
         />
       )}

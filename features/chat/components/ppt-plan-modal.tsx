@@ -9,29 +9,40 @@ import { moveSlideDown, moveSlideUp } from '@/features/projects/types';
 
 interface PPTPlanModalProps {
   pptPlan: { slides: Slide[] };
-  onUpdate: (plan: { slides: Slide[] }) => Promise<void> | void;
+  onUpdateSlide: (slide: Slide) => Promise<Slide | null>;
+  onAddSlide: (slide: Slide) => Promise<Slide | null>;
+  onDeleteSlide: (slideId: string) => Promise<boolean>;
+  onReorderSlides: (slideIds: string[]) => Promise<boolean>;
   onClose: () => void;
 }
 
-export default function PPTPlanModal({ pptPlan, onUpdate, onClose }: PPTPlanModalProps) {
+function createNewSlideDraft(): Slide {
+  return {
+    id: '',
+    type: 'content',
+    title: '新页面',
+    description: '请输入页面描述',
+    content: '',
+  };
+}
+
+export default function PPTPlanModal({
+  pptPlan,
+  onUpdateSlide,
+  onAddSlide,
+  onDeleteSlide,
+  onReorderSlides,
+  onClose,
+}: PPTPlanModalProps) {
   const [slides, setSlides] = useState<Slide[]>(pptPlan.slides);
   const [editingSlideIndex, setEditingSlideIndex] = useState<number | null>(null);
   const [editingSlide, setEditingSlide] = useState<Slide | null>(null);
+  const [isMutating, setIsMutating] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Helper to update local state and notify parent
-  const updateSlides = (newSlides: Slide[]) => {
-    setSlides(newSlides);
-    onUpdate({ slides: newSlides });
-  };
-
   useEffect(() => {
-    // Sync external pptPlan changes to local state, but only if they are different
-    // This allows parent updates (e.g. from Agent) to reflect here
-    if (JSON.stringify(slides) !== JSON.stringify(pptPlan.slides)) {
-      setSlides(pptPlan.slides);
-    }
-  }, [pptPlan.slides]); // Intentionally exclude 'slides' to avoid loop, we use explicit updateSlides
+    setSlides(pptPlan.slides);
+  }, [pptPlan.slides]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -92,39 +103,71 @@ export default function PPTPlanModal({ pptPlan, onUpdate, onClose }: PPTPlanModa
     setEditingSlide({ ...slides[index] });
   };
 
-  const saveEditSlide = () => {
+  const saveEditSlide = async () => {
     if (editingSlideIndex === null || !editingSlide) return;
-    const newSlides = [...slides];
-    newSlides[editingSlideIndex] = editingSlide;
-    updateSlides(newSlides);
-    setEditingSlideIndex(null);
-    setEditingSlide(null);
+    setIsMutating(true);
+    try {
+      const updatedSlide = await onUpdateSlide(editingSlide);
+      if (!updatedSlide) return;
+      setSlides((prev) => prev.map((slide, index) => (index === editingSlideIndex ? updatedSlide : slide)));
+      setEditingSlideIndex(null);
+      setEditingSlide(null);
+    } finally {
+      setIsMutating(false);
+    }
   };
 
-  const handleMoveSlideUp = (index: number) => {
-    const newSlides = moveSlideUp(slides, index);
-    updateSlides(newSlides);
+  const handleMoveSlide = async (index: number, direction: -1 | 1) => {
+    const nextSlides = direction === -1 ? moveSlideUp(slides, index) : moveSlideDown(slides, index);
+    if (nextSlides === slides) return;
+
+    const previousSlides = slides;
+    setSlides(nextSlides);
+    setIsMutating(true);
+    try {
+      const success = await onReorderSlides(nextSlides.map((slide) => slide.id));
+      if (!success) {
+        setSlides(previousSlides);
+      }
+    } finally {
+      setIsMutating(false);
+    }
   };
 
-  const handleMoveSlideDown = (index: number) => {
-    const newSlides = moveSlideDown(slides, index);
-    updateSlides(newSlides);
+  const handleDeleteSlide = async (index: number) => {
+    const slide = slides[index];
+    if (!slide) return;
+
+    const previousSlides = slides;
+    const nextSlides = slides.filter((_, currentIndex) => currentIndex !== index);
+    setSlides(nextSlides);
+    if (editingSlideIndex === index) {
+      setEditingSlideIndex(null);
+      setEditingSlide(null);
+    }
+
+    setIsMutating(true);
+    try {
+      const success = await onDeleteSlide(slide.id);
+      if (!success) {
+        setSlides(previousSlides);
+      }
+    } finally {
+      setIsMutating(false);
+    }
   };
 
-  const deleteSlide = (index: number) => {
-    const newSlides = slides.filter((_, i) => i !== index);
-    updateSlides(newSlides);
-  };
-
-  const addSlide = () => {
-    const newSlide: Slide = {
-      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2) + Date.now().toString(36),
-      type: 'content',
-      title: '新页面',
-      description: '请输入页面描述',
-      content: '',
-    };
-    updateSlides([...slides, newSlide]);
+  const handleAddSlide = async () => {
+    setIsMutating(true);
+    try {
+      const createdSlide = await onAddSlide(createNewSlideDraft());
+      if (!createdSlide) return;
+      setSlides((prev) => [...prev, createdSlide]);
+      setEditingSlideIndex(slides.length);
+      setEditingSlide(createdSlide);
+    } finally {
+      setIsMutating(false);
+    }
   };
 
   return (
@@ -137,7 +180,7 @@ export default function PPTPlanModal({ pptPlan, onUpdate, onClose }: PPTPlanModa
             </div>
             <div>
               <h2 className="text-xl font-black text-gray-900">PPT 规划编辑器</h2>
-              <p className="text-sm text-gray-500">{slides.length} 页</p>
+              <p className="text-sm text-gray-500">{slides.length} 页，动作实时同步到后端</p>
             </div>
           </div>
           <button
@@ -152,7 +195,7 @@ export default function PPTPlanModal({ pptPlan, onUpdate, onClose }: PPTPlanModa
           <div className="space-y-4">
             {slides.map((slide, index) => (
               <div
-                key={index}
+                key={slide.id || index}
                 className={`p-4 bg-white border-2 rounded-xl ${getSlideBorderColor(slide.type)} ${getSlideShadowColor(slide.type)}`}
               >
                 {editingSlideIndex === index ? (
@@ -176,14 +219,16 @@ export default function PPTPlanModal({ pptPlan, onUpdate, onClose }: PPTPlanModa
                       </div>
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={saveEditSlide}
-                          className="p-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors border-2 border-green-700"
+                          onClick={() => void saveEditSlide()}
+                          disabled={isMutating || !editingSlide?.title.trim()}
+                          className="p-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors border-2 border-green-700 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           <Save size={16} />
                         </button>
                         <button
                           onClick={() => { setEditingSlideIndex(null); setEditingSlide(null); }}
-                          className="p-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors border-2 border-gray-700"
+                          disabled={isMutating}
+                          className="p-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors border-2 border-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           <X size={16} />
                         </button>
@@ -225,31 +270,33 @@ export default function PPTPlanModal({ pptPlan, onUpdate, onClose }: PPTPlanModa
                       </div>
                       <div className="flex items-center gap-1">
                         <button
-                          onClick={() => handleMoveSlideUp(index)}
-                          disabled={index === 0 || editingSlideIndex !== null}
-                          className={`p-2 rounded-lg transition-colors ${index === 0 || editingSlideIndex !== null ? 'text-gray-300 cursor-not-allowed' : 'hover:bg-gray-100 text-gray-600'}`}
+                          onClick={() => void handleMoveSlide(index, -1)}
+                          disabled={index === 0 || editingSlideIndex !== null || isMutating}
+                          className={`p-2 rounded-lg transition-colors ${index === 0 || editingSlideIndex !== null || isMutating ? 'text-gray-300 cursor-not-allowed' : 'hover:bg-gray-100 text-gray-600'}`}
                           title="上移"
                         >
                           <ChevronUp size={16} />
                         </button>
                         <button
-                          onClick={() => handleMoveSlideDown(index)}
-                          disabled={index === slides.length - 1 || editingSlideIndex !== null}
-                          className={`p-2 rounded-lg transition-colors ${index === slides.length - 1 || editingSlideIndex !== null ? 'text-gray-300 cursor-not-allowed' : 'hover:bg-gray-100 text-gray-600'}`}
+                          onClick={() => void handleMoveSlide(index, 1)}
+                          disabled={index === slides.length - 1 || editingSlideIndex !== null || isMutating}
+                          className={`p-2 rounded-lg transition-colors ${index === slides.length - 1 || editingSlideIndex !== null || isMutating ? 'text-gray-300 cursor-not-allowed' : 'hover:bg-gray-100 text-gray-600'}`}
                           title="下移"
                         >
                           <ChevronDown size={16} />
                         </button>
                         <button
                           onClick={() => startEditSlide(index)}
-                          className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                          disabled={isMutating}
+                          className="p-2 hover:bg-gray-100 rounded-lg transition-colors disabled:text-gray-300 disabled:cursor-not-allowed"
                           title="编辑"
                         >
                           <Edit2 size={16} className="text-gray-600" />
                         </button>
                         <button
-                          onClick={() => deleteSlide(index)}
-                          className="p-2 hover:bg-red-100 rounded-lg transition-colors"
+                          onClick={() => void handleDeleteSlide(index)}
+                          disabled={isMutating}
+                          className="p-2 hover:bg-red-100 rounded-lg transition-colors disabled:text-gray-300 disabled:cursor-not-allowed"
                           title="删除"
                         >
                           <Trash2 size={16} className="text-red-600" />
@@ -269,8 +316,9 @@ export default function PPTPlanModal({ pptPlan, onUpdate, onClose }: PPTPlanModa
             ))}
 
             <button
-              onClick={addSlide}
-              className="w-full flex items-center justify-center gap-2 p-4 bg-white border-2 border-dashed border-gray-400 rounded-xl hover:border-[var(--doraemon-blue)] hover:bg-[#F0F8FF] transition-all"
+              onClick={() => void handleAddSlide()}
+              disabled={isMutating}
+              className="w-full flex items-center justify-center gap-2 p-4 bg-white border-2 border-dashed border-gray-400 rounded-xl hover:border-[var(--doraemon-blue)] hover:bg-[#F0F8FF] transition-all disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400"
             >
               <Plus size={20} className="text-gray-600" />
               <span className="font-bold text-gray-600">添加新页面</span>

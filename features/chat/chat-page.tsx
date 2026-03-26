@@ -19,18 +19,21 @@ import {
   type ProjectSummary,
   type Slide,
   stringifyProjectMessages,
-  syncManualPlanChanges,
 } from '@/features/projects';
 import type { PlannerAgentUIMessage } from '@/server/planner/create-planner-agent';
 import {
+  addSlide,
   createProject,
   deleteProject,
   getProject,
   listProjects,
+  reorderSlides,
   renameProject,
   replaceProjectSlides,
+  updateSlide,
   updateProjectMessages,
   updateProjectTitleAndMessages,
+  deleteSlide as deleteProjectSlide,
 } from '@/features/projects';
 
 const DEFAULT_PROJECT_TITLE = 'New Project';
@@ -219,13 +222,51 @@ function ChatInterface({
     schedulePersist(immediate);
   }, [messages, schedulePersist, status]);
 
-  const handlePptPlanUpdate = useCallback(
-    async (newPlan: { slides: Slide[] }) => {
-      const syncedPlan = await syncManualPlanChanges(chatId, pptPlan, newPlan);
-      setPptPlan(syncedPlan);
-      onProjectUpdate({ id: chatId, pptPlan: syncedPlan });
+  const commitPptPlan = useCallback((nextSlides: Slide[]) => {
+    const nextPlan = nextSlides.length > 0 ? { slides: nextSlides } : undefined;
+    setPptPlan(nextPlan);
+    onProjectUpdate({ id: chatId, pptPlan: nextPlan });
+  }, [chatId, onProjectUpdate]);
+
+  const handlePptPlanSlideUpdate = useCallback(
+    async (slide: Slide) => {
+      const updatedSlide = await updateSlide(chatId, slide.id, slide);
+      const nextSlides = (pptPlan?.slides ?? []).map((item) => (item.id === slide.id ? updatedSlide : item));
+      commitPptPlan(nextSlides);
+      return updatedSlide;
     },
-    [chatId, onProjectUpdate, pptPlan],
+    [chatId, commitPptPlan, pptPlan?.slides],
+  );
+
+  const handlePptPlanAddSlide = useCallback(
+    async (slide: Slide) => {
+      const createdSlide = await addSlide(chatId, slide);
+      commitPptPlan([...(pptPlan?.slides ?? []), createdSlide]);
+      return createdSlide;
+    },
+    [chatId, commitPptPlan, pptPlan?.slides],
+  );
+
+  const handlePptPlanDeleteSlide = useCallback(
+    async (slideId: string) => {
+      await deleteProjectSlide(chatId, slideId);
+      commitPptPlan((pptPlan?.slides ?? []).filter((slide) => slide.id !== slideId));
+      return true;
+    },
+    [chatId, commitPptPlan, pptPlan?.slides],
+  );
+
+  const handlePptPlanReorderSlides = useCallback(
+    async (slideIds: string[]) => {
+      await reorderSlides(chatId, slideIds);
+      const slideMap = new Map((pptPlan?.slides ?? []).map((slide) => [slide.id, slide]));
+      const nextSlides = slideIds
+        .map((slideId) => slideMap.get(slideId))
+        .filter((slide): slide is Slide => Boolean(slide));
+      commitPptPlan(nextSlides);
+      return true;
+    },
+    [chatId, commitPptPlan, pptPlan?.slides],
   );
 
   const handleSendMessage = useCallback(
@@ -410,7 +451,13 @@ function ChatInterface({
               </div>
             </div>
 
-            <PPTPlanPreview pptPlan={pptPlan} onUpdate={handlePptPlanUpdate} />
+            <PPTPlanPreview
+              pptPlan={pptPlan}
+              onUpdateSlide={handlePptPlanSlideUpdate}
+              onAddSlide={handlePptPlanAddSlide}
+              onDeleteSlide={handlePptPlanDeleteSlide}
+              onReorderSlides={handlePptPlanReorderSlides}
+            />
 
             <div className="border-t border-gray-200 bg-gray-50">
               <div className="w-full max-w-3xl mx-auto px-4 py-4">

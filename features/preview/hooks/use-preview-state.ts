@@ -20,11 +20,13 @@ import {
   generateSlideAudio,
   generateSlideImage,
   generateVideo,
+  getDialogueAudioUrl,
   getProject,
   getSlideAudioUrl,
   getSlideImageUrl,
   getTask,
   listDialogues,
+  modifySlideImage,
   reorderDialogues,
   updateDialogue,
 } from '@/features/projects/api';
@@ -45,18 +47,14 @@ import {
   markGenerationStageCompleted,
   persistGenerationSession,
 } from '@/features/preview/utils/generation-session';
-import { normalizeDialogues } from '../utils';
+import {
+  normalizeDialogues,
+  removeDialogueById,
+  reorderDialoguesLocally,
+  upsertDialogue,
+} from '../utils';
 
 const POLL_INTERVAL_MS = 1500;
-
-function dialoguesDiffer(left: Dialogue, right: Dialogue) {
-  return (
-    left.role !== right.role ||
-    left.content !== right.content ||
-    (left.emotion ?? '无明显情感') !== (right.emotion ?? '无明显情感') ||
-    (left.speed ?? '中速') !== (right.speed ?? '中速')
-  );
-}
 
 function createErroredSession(
   projectId: string,
@@ -86,7 +84,7 @@ export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: st
   const [projectVideoPath, setProjectVideoPath] = useState<string | undefined>();
   const [currentSlideIndex, setCurrentSlideIndexState] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
-  const [isSavingDialogues, setIsSavingDialogues] = useState(false);
+  const [activeActionKey, setActiveActionKey] = useState<string | null>(null);
   const [generationSession, setGenerationSession] = useState<GenerationSessionState | null>(null);
   const generationSessionRef = useRef<GenerationSessionState | null>(null);
 
@@ -130,6 +128,27 @@ export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: st
     setProjectVideoPath(project.videoPath ?? undefined);
     return project;
   }, [projectId]);
+
+  const replaceSlideDialoguesInState = useCallback((slideId: string, dialogues: Dialogue[]) => {
+    setPlan((prev) => {
+      if (!prev) return prev;
+      return {
+        slides: prev.slides.map((slide) => (slide.id === slideId ? { ...slide, dialogues } : slide)),
+      };
+    });
+  }, []);
+
+  const runAction = useCallback(async <T,>(key: string, task: () => Promise<T>) => {
+    setActiveActionKey(key);
+    try {
+      return await task();
+    } catch (error) {
+      console.error(`Failed action: ${key}`, error);
+      return null;
+    } finally {
+      setActiveActionKey((current) => (current === key ? null : current));
+    }
+  }, []);
 
   const startStageTask = useCallback(
     async (
@@ -358,14 +377,7 @@ export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: st
       try {
         const dialogues = await listDialogues(projectId, currentSlide.id);
         if (cancelled) return;
-        setPlan((prev) => {
-          if (!prev) return prev;
-          return {
-            slides: prev.slides.map((slide) =>
-              slide.id === currentSlide.id ? { ...slide, dialogues } : slide,
-            ),
-          };
-        });
+        replaceSlideDialoguesInState(currentSlide.id, dialogues);
       } catch (error) {
         console.error('Failed to fetch dialogues:', error);
       }
@@ -375,29 +387,23 @@ export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: st
     return () => {
       cancelled = true;
     };
-  }, [currentSlide?.dialogues, currentSlide?.id, projectId]);
+  }, [currentSlide?.dialogues, currentSlide?.id, projectId, replaceSlideDialoguesInState]);
 
   const displayDialogues = useMemo(() => currentSlide?.dialogues ?? [], [currentSlide]);
-
-  const replaceSlideDialoguesInState = useCallback((slideId: string, dialogues: Dialogue[]) => {
-    setPlan((prev) => {
-      if (!prev) return prev;
-      return {
-        slides: prev.slides.map((slide) => (slide.id === slideId ? { ...slide, dialogues } : slide)),
-      };
-    });
-  }, []);
+  const slideImageUrl = useMemo(
+    () => (projectId && currentSlide?.id && currentSlide.imagePath ? getSlideImageUrl(projectId, currentSlide.id) : null),
+    [currentSlide?.id, currentSlide?.imagePath, projectId],
+  );
 
   const handleGenerateDialogues = useCallback(async () => {
     if (!projectId || !currentSlide?.id) return;
-    try {
+    const actionKey = `generate-dialogues:${currentSlide.id}`;
+    await runAction(actionKey, async () => {
       const dialogues = normalizeDialogues(await generateDialogues(projectId, currentSlide.id));
       replaceSlideDialoguesInState(currentSlide.id, dialogues);
-      await refreshProject();
-    } catch (error) {
-      console.error('Failed to generate dialogues:', error);
-    }
-  }, [currentSlide?.id, projectId, refreshProject, replaceSlideDialoguesInState]);
+      return dialogues;
+    });
+  }, [currentSlide?.id, projectId, replaceSlideDialoguesInState, runAction]);
 
   const handleStartStageGeneration = useCallback(
     async (stage: GenerationStage) => {
@@ -432,86 +438,130 @@ export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: st
     }
   }, [commitGenerationSession]);
 
-  const handleSaveManualDialogues = useCallback(
-    async (dialogues: Dialogue[]) => {
-      if (!projectId || !currentSlide?.id) return false;
-      setIsSavingDialogues(true);
+  const handleAddDialogue = useCallback(async () => {
+    if (!projectId || !currentSlide?.id) return null;
+    const actionKey = `dialogue-add:${currentSlide.id}`;
+    return runAction(actionKey, async () => {
+      const createdDialogue = await addDialogue(projectId, currentSlide.id, {
+        id: '',
+        role: '旁白',
+        content: '',
+        emotion: '无明显情感',
+        speed: '中速',
+      });
+      replaceSlideDialoguesInState(currentSlide.id, [...displayDialogues, createdDialogue]);
+      return createdDialogue;
+    });
+  }, [currentSlide?.id, displayDialogues, projectId, replaceSlideDialoguesInState, runAction]);
 
-      try {
-        const existingDialogues = currentSlide.dialogues ?? [];
-        const existingById = new Map(existingDialogues.map((dialogue) => [dialogue.id, dialogue]));
-        const nextIds = new Set(dialogues.map((dialogue) => dialogue.id));
+  const handleUpdateDialogue = useCallback(async (dialogue: Dialogue) => {
+    if (!projectId || !currentSlide?.id) return false;
+    const actionKey = `dialogue-update:${dialogue.id}`;
+    const result = await runAction(actionKey, async () => {
+      const updatedDialogue = await updateDialogue(projectId, currentSlide.id, dialogue);
+      replaceSlideDialoguesInState(
+        currentSlide.id,
+        upsertDialogue(displayDialogues, updatedDialogue),
+      );
+      return updatedDialogue;
+    });
+    return Boolean(result);
+  }, [currentSlide?.id, displayDialogues, projectId, replaceSlideDialoguesInState, runAction]);
 
-        for (const existing of existingDialogues) {
-          if (!nextIds.has(existing.id)) {
-            await deleteDialogue(projectId, currentSlide.id, existing.id);
-          }
-        }
+  const handleDeleteDialogue = useCallback(async (dialogueId: string) => {
+    if (!projectId || !currentSlide?.id) return false;
+    const previousDialogues = displayDialogues;
+    replaceSlideDialoguesInState(currentSlide.id, removeDialogueById(previousDialogues, dialogueId));
 
-        const finalDialogues: Dialogue[] = [];
+    const actionKey = `dialogue-delete:${dialogueId}`;
+    const result = await runAction(actionKey, async () => {
+      await deleteDialogue(projectId, currentSlide.id, dialogueId);
+      return true;
+    });
 
-        for (const dialogue of dialogues) {
-          const existing = existingById.get(dialogue.id);
-          if (!existing) {
-            finalDialogues.push(await addDialogue(projectId, currentSlide.id, dialogue));
-            continue;
-          }
+    if (!result) {
+      replaceSlideDialoguesInState(currentSlide.id, previousDialogues);
+      return false;
+    }
 
-          if (dialoguesDiffer(existing, dialogue)) {
-            finalDialogues.push(await updateDialogue(projectId, currentSlide.id, dialogue));
-          } else {
-            finalDialogues.push(dialogue);
-          }
-        }
+    return true;
+  }, [currentSlide?.id, displayDialogues, projectId, replaceSlideDialoguesInState, runAction]);
 
-        await reorderDialogues(
-          projectId,
-          currentSlide.id,
-          finalDialogues.map((dialogue) => dialogue.id),
-        );
+  const handleMoveDialogue = useCallback(async (dialogueId: string, direction: -1 | 1) => {
+    if (!projectId || !currentSlide?.id) return false;
+    const previousDialogues = displayDialogues;
+    const reorderedDialogues = reorderDialoguesLocally(previousDialogues, dialogueId, direction);
+    if (reorderedDialogues === previousDialogues) {
+      return false;
+    }
 
-        const latestDialogues = normalizeDialogues(await listDialogues(projectId, currentSlide.id));
-        replaceSlideDialoguesInState(currentSlide.id, latestDialogues);
-        return true;
-      } catch (error) {
-        console.error('Failed to save manual dialogues:', error);
-        return false;
-      } finally {
-        setIsSavingDialogues(false);
-      }
-    },
-    [currentSlide, projectId, replaceSlideDialoguesInState],
-  );
+    replaceSlideDialoguesInState(currentSlide.id, reorderedDialogues);
+
+    const actionKey = `dialogue-reorder:${currentSlide.id}`;
+    const result = await runAction(actionKey, async () => {
+      await reorderDialogues(
+        projectId,
+        currentSlide.id,
+        reorderedDialogues.map((dialogue) => dialogue.id),
+      );
+      return true;
+    });
+
+    if (!result) {
+      replaceSlideDialoguesInState(currentSlide.id, previousDialogues);
+      return false;
+    }
+
+    return true;
+  }, [currentSlide?.id, displayDialogues, projectId, replaceSlideDialoguesInState, runAction]);
 
   const handleGenerateImage = useCallback(async () => {
     if (!projectId || !currentSlide?.id) return;
-    try {
+    const actionKey = `generate-image:${currentSlide.id}`;
+    await runAction(actionKey, async () => {
       await generateSlideImage(projectId, currentSlide.id);
       await refreshProject();
-    } catch (error) {
-      console.error('Failed to generate image:', error);
-    }
-  }, [currentSlide?.id, projectId, refreshProject]);
+      return true;
+    });
+  }, [currentSlide?.id, projectId, refreshProject, runAction]);
+
+  const handleModifyImage = useCallback(async (prompt: string) => {
+    if (!projectId || !currentSlide?.id) return false;
+    const actionKey = `modify-image:${currentSlide.id}`;
+    const result = await runAction(actionKey, async () => {
+      await modifySlideImage(projectId, currentSlide.id, prompt);
+      await refreshProject();
+      return true;
+    });
+    return Boolean(result);
+  }, [currentSlide?.id, projectId, refreshProject, runAction]);
 
   const handleGenerateAudio = useCallback(async () => {
     if (!projectId || !currentSlide?.id) return;
-    try {
+    const actionKey = `generate-audio:${currentSlide.id}`;
+    await runAction(actionKey, async () => {
       await generateSlideAudio(projectId, currentSlide.id);
       await refreshProject();
-    } catch (error) {
-      console.error('Failed to generate audio:', error);
-    }
-  }, [currentSlide?.id, projectId, refreshProject]);
+      return true;
+    });
+  }, [currentSlide?.id, projectId, refreshProject, runAction]);
 
   const handleOpenSlideAudio = useCallback(() => {
-    if (!projectId || !currentSlide?.id) return;
+    if (!projectId || !currentSlide?.id || !currentSlide.audioPath) return;
     window.open(getSlideAudioUrl(projectId, currentSlide.id), '_blank', 'noopener,noreferrer');
-  }, [currentSlide?.id, projectId]);
+  }, [currentSlide?.audioPath, currentSlide?.id, projectId]);
 
   const handleOpenSlideImage = useCallback(() => {
-    if (!projectId || !currentSlide?.id) return;
+    if (!projectId || !currentSlide?.id || !currentSlide.imagePath) return;
     window.open(getSlideImageUrl(projectId, currentSlide.id), '_blank', 'noopener,noreferrer');
-  }, [currentSlide?.id, projectId]);
+  }, [currentSlide?.id, currentSlide?.imagePath, projectId]);
+
+  const handleOpenDialogueAudio = useCallback((dialogueId: string) => {
+    if (!projectId || !currentSlide?.id) return;
+    const dialogue = displayDialogues.find((item) => item.id === dialogueId);
+    if (!dialogue?.audioPath) return;
+    window.open(getDialogueAudioUrl(projectId, currentSlide.id, dialogueId), '_blank', 'noopener,noreferrer');
+  }, [currentSlide?.id, displayDialogues, projectId]);
 
   const handleDownloadVideo = useCallback(async () => {
     if (!projectId) return;
@@ -553,23 +603,33 @@ export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: st
     setCurrentSlideIndex,
     isLoading,
     isGeneratingAll: isGenerationSessionActive(generationSession),
-    isSavingDialogues,
+    isDialogueActionPending: activeActionKey?.startsWith('dialogue-') ?? false,
     generationSession,
     overallGenerationProgress,
     currentStageTaskProgress,
     currentSlide,
     displayDialogues,
+    currentSlideImageUrl: slideImageUrl,
     projectVideoPath,
+    isGeneratingImage: activeActionKey === `generate-image:${currentSlide?.id ?? ''}`,
+    isModifyingImage: activeActionKey === `modify-image:${currentSlide?.id ?? ''}`,
+    isGeneratingDialogues: activeActionKey === `generate-dialogues:${currentSlide?.id ?? ''}`,
+    isGeneratingAudio: activeActionKey === `generate-audio:${currentSlide?.id ?? ''}`,
     handleGenerateDialogues,
     handleGenerateAll,
     handleStartStageGeneration,
     handleStopGeneration,
     handleForceRefresh: refreshProject,
-    handleSaveManualDialogues,
+    handleAddDialogue,
+    handleUpdateDialogue,
+    handleDeleteDialogue,
+    handleMoveDialogue,
     handleGenerateImage,
+    handleModifyImage,
     handleGenerateAudio,
     handleOpenSlideAudio,
     handleOpenSlideImage,
+    handleOpenDialogueAudio,
     handleDownloadVideo,
   };
 }
