@@ -4,6 +4,7 @@ import { X, Sparkles, BookOpen, Lightbulb, FileText, Star, Edit2, Save, Trash2, 
 import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { shouldApplyIncomingPlanToModal } from '@/features/chat/ppt-plan-state';
 import type { Slide, SlideType } from '@/features/projects/types';
 import { moveSlideDown, moveSlideUp } from '@/features/projects/types';
 
@@ -41,8 +42,12 @@ export default function PPTPlanModal({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (!shouldApplyIncomingPlanToModal(editingSlideIndex, isMutating)) {
+      return;
+    }
+
     setSlides(pptPlan.slides);
-  }, [pptPlan.slides]);
+  }, [editingSlideIndex, isMutating, pptPlan.slides]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -180,7 +185,7 @@ export default function PPTPlanModal({
             </div>
             <div>
               <h2 className="text-xl font-black text-gray-900">PPT 规划编辑器</h2>
-              <p className="text-sm text-gray-500">{slides.length} 页，动作实时同步到后端</p>
+              <p className="text-sm text-gray-500">{slides.length} 页，流式预览，完成后统一同步到后端</p>
             </div>
           </div>
           <button

@@ -9,6 +9,12 @@ import { useRouter } from 'next/navigation';
 import ChatInput from '@/features/chat/components/chat-input';
 import PPTPlanPreview from '@/features/chat/components/ppt-plan-preview';
 import Sidebar from '@/features/chat/components/sidebar';
+import {
+  createPptPlan,
+  extractLatestPptPlanState,
+  getPptPlanSignature,
+  shouldSyncCompletedPptPlan,
+} from '@/features/chat/ppt-plan-state';
 import { ThinkingBlock } from '@/features/chat/components/thinking-block';
 import ToolView from '@/features/chat/components/tool-view';
 import {
@@ -69,15 +75,17 @@ function ChatInterface({
     id: chatId,
   });
 
-  const [pptPlan, setPptPlan] = useState(project.pptPlan);
-  const processedToolCallIds = useRef<Set<string>>(new Set());
-  const hasInitializedToolCallsRef = useRef(false);
+  const [persistedPptPlan, setPersistedPptPlan] = useState(project.pptPlan);
+  const [draftPptPlan, setDraftPptPlan] = useState<{ slides: Slide[] } | undefined>();
   const projectTitleRef = useRef(project.title);
   const syncTimerRef = useRef<number | null>(null);
   const latestMessagesRef = useRef<any[]>(project.messages ?? []);
   const lastSyncedSignatureRef = useRef(stringifyProjectMessages(project.messages ?? []));
   const isPersistingRef = useRef(false);
   const shouldPersistAgainRef = useRef(false);
+  const lastSyncedPlanSignatureRef = useRef(getPptPlanSignature(project.pptPlan?.slides));
+
+  const effectivePptPlan = draftPptPlan ?? persistedPptPlan;
 
   const persistMessages = useCallback(async () => {
     if (isPersistingRef.current) {
@@ -144,32 +152,31 @@ function ChatInterface({
     setMessages(projectMessages);
     latestMessagesRef.current = projectMessages;
     lastSyncedSignatureRef.current = stringifyProjectMessages(projectMessages);
-    setPptPlan(project.pptPlan);
+    setPersistedPptPlan(project.pptPlan);
+    setDraftPptPlan(undefined);
+    lastSyncedPlanSignatureRef.current = getPptPlanSignature(project.pptPlan?.slides);
     projectTitleRef.current = project.title;
-
-    const restoredToolCallIds = new Set<string>();
-    projectMessages.forEach((message: any) => {
-      const parts = message?.parts;
-      if (!Array.isArray(parts)) return;
-      parts.forEach((part: any) => {
-        const partType = part?.type;
-        if (partType !== 'tool-create_ppt_plan') return;
-        const toolCallId =
-          part?.toolCallId || part?.toolInvocation?.toolCallId || part?.toolInvocation?.toolCallID;
-        if (typeof toolCallId === 'string' && toolCallId) {
-          restoredToolCallIds.add(toolCallId);
-        }
-      });
-    });
-    processedToolCallIds.current = restoredToolCallIds;
-    hasInitializedToolCallsRef.current = true;
 
     return () => {
       if (syncTimerRef.current) {
         window.clearTimeout(syncTimerRef.current);
       }
     };
-  }, [project, setMessages]);
+  }, [project.id, setMessages]);
+
+  useEffect(() => {
+    if (project.id !== chatId) {
+      return;
+    }
+
+    const nextSignature = getPptPlanSignature(project.pptPlan?.slides);
+    if (nextSignature === lastSyncedPlanSignatureRef.current) {
+      return;
+    }
+
+    setPersistedPptPlan(project.pptPlan);
+    lastSyncedPlanSignatureRef.current = nextSignature;
+  }, [chatId, project.id, project.pptPlan]);
 
   useEffect(() => {
     latestMessagesRef.current = messages;
@@ -189,62 +196,64 @@ function ChatInterface({
   }, [messages, schedulePersist, status]);
 
   const commitPptPlan = useCallback((nextSlides: Slide[]) => {
-    const nextPlan = nextSlides.length > 0 ? { slides: nextSlides } : undefined;
-    setPptPlan(nextPlan);
+    const nextPlan = createPptPlan(nextSlides);
+    setPersistedPptPlan(nextPlan);
+    setDraftPptPlan(undefined);
+    lastSyncedPlanSignatureRef.current = getPptPlanSignature(nextSlides);
     onProjectUpdate({ id: chatId, pptPlan: nextPlan });
   }, [chatId, onProjectUpdate]);
 
   const handlePptPlanSlideUpdate = useCallback(
     async (slide: Slide) => {
       const updatedSlide = await updateSlide(chatId, slide.id, slide);
-      const nextSlides = (pptPlan?.slides ?? []).map((item) => (item.id === slide.id ? updatedSlide : item));
+      const nextSlides = (effectivePptPlan?.slides ?? []).map((item) => (item.id === slide.id ? updatedSlide : item));
       commitPptPlan(nextSlides);
       return updatedSlide;
     },
-    [chatId, commitPptPlan, pptPlan?.slides],
+    [chatId, commitPptPlan, effectivePptPlan?.slides],
   );
 
   const handlePptPlanAddSlide = useCallback(
     async (slide: Slide) => {
       const createdSlide = await addSlide(chatId, slide);
-      commitPptPlan([...(pptPlan?.slides ?? []), createdSlide]);
+      commitPptPlan([...(effectivePptPlan?.slides ?? []), createdSlide]);
       return createdSlide;
     },
-    [chatId, commitPptPlan, pptPlan?.slides],
+    [chatId, commitPptPlan, effectivePptPlan?.slides],
   );
 
   const handlePptPlanDeleteSlide = useCallback(
     async (slideId: string) => {
       await deleteProjectSlide(chatId, slideId);
-      commitPptPlan((pptPlan?.slides ?? []).filter((slide) => slide.id !== slideId));
+      commitPptPlan((effectivePptPlan?.slides ?? []).filter((slide) => slide.id !== slideId));
       return true;
     },
-    [chatId, commitPptPlan, pptPlan?.slides],
+    [chatId, commitPptPlan, effectivePptPlan?.slides],
   );
 
   const handlePptPlanReorderSlides = useCallback(
     async (slideIds: string[]) => {
       await reorderSlides(chatId, slideIds);
-      const slideMap = new Map((pptPlan?.slides ?? []).map((slide) => [slide.id, slide]));
+      const slideMap = new Map((effectivePptPlan?.slides ?? []).map((slide) => [slide.id, slide]));
       const nextSlides = slideIds
         .map((slideId) => slideMap.get(slideId))
         .filter((slide): slide is Slide => Boolean(slide));
       commitPptPlan(nextSlides);
       return true;
     },
-    [chatId, commitPptPlan, pptPlan?.slides],
+    [chatId, commitPptPlan, effectivePptPlan?.slides],
   );
 
   const handleSendMessage = useCallback(
     (text: string, options?: any) => {
       const body: any = {
         id: chatId,
-        pptPlan,
+        pptPlan: effectivePptPlan,
         ...options,
       };
       sendMessage({ text }, { body });
     },
-    [chatId, pptPlan, sendMessage],
+    [chatId, effectivePptPlan, sendMessage],
   );
 
   const handleOpenPreview = useCallback(() => {
@@ -252,41 +261,34 @@ function ChatInterface({
   }, [chatId, router]);
 
   useEffect(() => {
-    if (!hasInitializedToolCallsRef.current) return;
+    const extraction = extractLatestPptPlanState(messages);
+    setDraftPptPlan(extraction.hasDraft ? createPptPlan(extraction.draftSlides) : undefined);
 
-    const processMessages = async () => {
-      for (const message of messages) {
-        const parts = (message as any).parts;
-        if (!Array.isArray(parts)) continue;
+    if (!shouldSyncCompletedPptPlan(status, extraction, lastSyncedPlanSignatureRef.current)) {
+      return;
+    }
 
-        for (const part of parts) {
-          if (!part || typeof part !== 'object') continue;
-          const type = (part as any)?.type;
-          const partState = (part as any)?.state || (part as any)?.toolInvocation?.state;
-          const toolCallId =
-            part?.toolCallId || part?.toolInvocation?.toolCallId || part?.toolInvocation?.toolCallID || 'unknown';
-          if (processedToolCallIds.current.has(toolCallId)) continue;
+    let cancelled = false;
 
-          if (type !== 'tool-create_ppt_plan') continue;
-          if (partState !== 'result' && partState !== 'output-available') continue;
-
-          const args = part?.args || part?.toolInvocation?.args || part?.input || part?.toolInvocation?.input;
-          const output = part?.output || part?.toolInvocation?.output;
-          const slides = output?.slides || args?.slides;
-          if (!Array.isArray(slides)) continue;
-
-          processedToolCallIds.current.add(toolCallId);
-
-          const persistedSlides = slides.length > 0 ? await replaceProjectSlides(chatId, slides as Slide[]) : [];
-          const nextPptPlan = persistedSlides.length > 0 ? { slides: persistedSlides } : undefined;
-          setPptPlan(nextPptPlan);
-          onProjectUpdate({ id: chatId, pptPlan: nextPptPlan });
+    const syncCompletedPlan = async () => {
+      try {
+        const persistedSlides = await replaceProjectSlides(chatId, extraction.completedSlides);
+        if (cancelled) {
+          return;
         }
+
+        commitPptPlan(persistedSlides);
+      } catch (error) {
+        console.error('Failed to persist completed PPT plan:', error);
       }
     };
 
-    void processMessages();
-  }, [messages, chatId, onProjectUpdate]);
+    void syncCompletedPlan();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [messages, status, chatId, commitPptPlan]);
 
   return (
     <div className="flex flex-col lg:flex-row h-screen bg-[#F0F8FF]">
@@ -304,7 +306,7 @@ function ChatInterface({
           </div>
         ) : (
           <>
-            {pptPlan?.slides?.length ? (
+            {effectivePptPlan?.slides?.length ? (
               <div className="border-b border-gray-200 bg-white">
                 <div className="w-full max-w-3xl mx-auto px-4 py-3 flex justify-end">
                   <button
@@ -417,7 +419,7 @@ function ChatInterface({
             </div>
 
             <PPTPlanPreview
-              pptPlan={pptPlan}
+              pptPlan={effectivePptPlan}
               onUpdateSlide={handlePptPlanSlideUpdate}
               onAddSlide={handlePptPlanAddSlide}
               onDeleteSlide={handlePptPlanDeleteSlide}
