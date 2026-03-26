@@ -91,3 +91,32 @@ export interface TaskProgress {
   createdAt: string;
   updatedAt: string;
 }
+
+export const GENERATION_STAGES = ['images', 'dialogues', 'audio', 'video'] as const;
+export const GENERATION_SESSION_MODES = ['pipeline', 'single-stage'] as const;
+export const GENERATION_STAGE_STATUSES = ['pending', 'running', 'completed', 'failed', 'cancelled'] as const;
+export const GENERATION_SESSION_STATUSES = ['running', 'completed', 'failed', 'cancelled'] as const;
+
+export type GenerationStage = (typeof GENERATION_STAGES)[number];
+export type GenerationSessionMode = (typeof GENERATION_SESSION_MODES)[number];
+export type GenerationStageStatus = (typeof GENERATION_STAGE_STATUSES)[number];
+export type GenerationSessionStatus = (typeof GENERATION_SESSION_STATUSES)[number];
+
+export interface GenerationStageState {
+  stage: GenerationStage;
+  label: string;
+  status: GenerationStageStatus;
+  progress: number;
+  taskId?: string;
+}
+
+export interface GenerationSessionState {
+  mode: GenerationSessionMode;
+  projectId: string;
+  status: GenerationSessionStatus;
+  currentStage: GenerationStage | null;
+  stages: GenerationStageState[];
+  activeTask?: TaskProgress | null;
+  errorMessage?: string | null;
+  updatedAt: number;
+}

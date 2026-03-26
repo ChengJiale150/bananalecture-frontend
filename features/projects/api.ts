@@ -18,6 +18,7 @@ import type {
   DialogueEmotion,
   DialogueRole,
   DialogueSpeed,
+  GenerationStage,
   ProjectListPage,
   ProjectRecord,
   ProjectSummary,
@@ -34,7 +35,9 @@ import {
 
 const DEFAULT_USER_ID = 'admin';
 
-const apiClient = createBananaLectureApiClient();
+function getApiClient() {
+  return createBananaLectureApiClient();
+}
 
 function toDialogueRole(role: string): DialogueRole {
   return role as DialogueRole;
@@ -136,6 +139,7 @@ export function createDialogueUpdateInput(dialogue: Dialogue): UpdateDialogueReq
 }
 
 export async function listProjects(query: ListProjectsQuery = {}): Promise<ProjectListPage> {
+  const apiClient = getApiClient();
   const response = await apiClient.listProjects(DEFAULT_USER_ID, {
     page: query.page ?? DEFAULT_PROJECT_LIST_PAGE,
     page_size: query.page_size ?? DEFAULT_PROJECT_LIST_PAGE_SIZE,
@@ -155,6 +159,7 @@ export async function listProjects(query: ListProjectsQuery = {}): Promise<Proje
 }
 
 export async function createProject(payload: Pick<CreateProjectRequest, 'name'>) {
+  const apiClient = getApiClient();
   const response = await apiClient.createProject({
     user_id: DEFAULT_USER_ID,
     name: payload.name,
@@ -164,19 +169,23 @@ export async function createProject(payload: Pick<CreateProjectRequest, 'name'>)
 }
 
 export async function getProject(projectId: string) {
+  const apiClient = getApiClient();
   const response = await apiClient.getProject(projectId);
   return mapProjectRecord(response.data);
 }
 
 export async function renameProject(projectId: string, title: string) {
+  const apiClient = getApiClient();
   await apiClient.updateProject(projectId, { name: title });
 }
 
 export async function updateProjectMessages(projectId: string, messages: any[]) {
+  const apiClient = getApiClient();
   await apiClient.updateProject(projectId, { messages: stringifyProjectMessages(messages) });
 }
 
 export async function updateProjectTitleAndMessages(projectId: string, title: string, messages: any[]) {
+  const apiClient = getApiClient();
   await apiClient.updateProject(projectId, {
     name: title,
     messages: stringifyProjectMessages(messages),
@@ -184,10 +193,12 @@ export async function updateProjectTitleAndMessages(projectId: string, title: st
 }
 
 export async function deleteProject(projectId: string) {
+  const apiClient = getApiClient();
   await apiClient.deleteProject(projectId);
 }
 
 export async function replaceProjectSlides(projectId: string, slides: Slide[]) {
+  const apiClient = getApiClient();
   const response = await apiClient.createSlides(projectId, {
     slides: slides.map(createSlideInput),
   });
@@ -195,44 +206,53 @@ export async function replaceProjectSlides(projectId: string, slides: Slide[]) {
 }
 
 export async function updateSlide(projectId: string, slideId: string, slide: Slide) {
+  const apiClient = getApiClient();
   const response = await apiClient.updateSlide(projectId, slideId, createSlideInput(slide));
   return mapSlide(response.data);
 }
 
 export async function addSlide(projectId: string, slide: Slide) {
+  const apiClient = getApiClient();
   const response = await apiClient.addSlide(projectId, createSlideInput(slide));
   return mapSlide(response.data);
 }
 
 export async function deleteSlide(projectId: string, slideId: string) {
+  const apiClient = getApiClient();
   await apiClient.deleteSlide(projectId, slideId);
 }
 
 export async function reorderSlides(projectId: string, slideIds: string[]) {
+  const apiClient = getApiClient();
   await apiClient.reorderSlides(projectId, { slide_ids: slideIds });
 }
 
 export async function listDialogues(projectId: string, slideId: string) {
+  const apiClient = getApiClient();
   const response = await apiClient.listDialogues(projectId, slideId);
   return response.data.items.sort((a, b) => a.idx - b.idx).map(mapDialogue);
 }
 
 export async function generateDialogues(projectId: string, slideId: string) {
+  const apiClient = getApiClient();
   const response = await apiClient.generateSlideDialogues(projectId, slideId);
   return response.data.dialogues.sort((a, b) => a.idx - b.idx).map(mapDialogue);
 }
 
 export async function batchGenerateDialogues(projectId: string) {
+  const apiClient = getApiClient();
   const response = await apiClient.batchGenerateDialogues(projectId);
   return response.data.task_id;
 }
 
 export async function addDialogue(projectId: string, slideId: string, dialogue: Dialogue) {
+  const apiClient = getApiClient();
   const response = await apiClient.addDialogue(projectId, slideId, createDialogueInput(dialogue));
   return mapDialogue(response.data);
 }
 
 export async function updateDialogue(projectId: string, slideId: string, dialogue: Dialogue) {
+  const apiClient = getApiClient();
   const response = await apiClient.updateDialogue(
     projectId,
     slideId,
@@ -243,58 +263,122 @@ export async function updateDialogue(projectId: string, slideId: string, dialogu
 }
 
 export async function deleteDialogue(projectId: string, slideId: string, dialogueId: string) {
+  const apiClient = getApiClient();
   await apiClient.deleteDialogue(projectId, slideId, dialogueId);
 }
 
 export async function reorderDialogues(projectId: string, slideId: string, dialogueIds: string[]) {
+  const apiClient = getApiClient();
   await apiClient.reorderDialogues(projectId, slideId, { dialogue_ids: dialogueIds });
 }
 
 export async function generateSlideImage(projectId: string, slideId: string) {
+  const apiClient = getApiClient();
   await apiClient.generateSlideImage(projectId, slideId);
 }
 
 export async function modifySlideImage(projectId: string, slideId: string, prompt: string) {
+  const apiClient = getApiClient();
   await apiClient.modifySlideImage(projectId, slideId, { prompt });
 }
 
 export async function batchGenerateImages(projectId: string) {
+  const apiClient = getApiClient();
   const response = await apiClient.batchGenerateImages(projectId);
   return response.data.task_id;
 }
 
 export async function generateSlideAudio(projectId: string, slideId: string) {
+  const apiClient = getApiClient();
   await apiClient.generateSlideAudio(projectId, slideId);
 }
 
 export async function batchGenerateAudio(projectId: string) {
+  const apiClient = getApiClient();
   const response = await apiClient.batchGenerateAudio(projectId);
   return response.data.task_id;
 }
 
 export async function generateVideo(projectId: string) {
+  const apiClient = getApiClient();
   const response = await apiClient.generateVideo(projectId);
   return response.data.task_id;
 }
 
 export async function getTask(taskId: string) {
+  const apiClient = getApiClient();
   const response = await apiClient.getTask(taskId);
   return mapTask(response.data);
 }
 
 export async function cancelTask(taskId: string) {
+  const apiClient = getApiClient();
   const response = await apiClient.cancelTask(taskId);
   return mapTask(response.data);
 }
 
 export function getSlideImageUrl(projectId: string, slideId: string) {
+  const apiClient = getApiClient();
   return apiClient.getSlideImageFileUrl(projectId, slideId);
 }
 
 export function getSlideAudioUrl(projectId: string, slideId: string) {
+  const apiClient = getApiClient();
   return apiClient.getSlideAudioFileUrl(projectId, slideId);
 }
 
 export function getVideoUrl(projectId: string) {
+  const apiClient = getApiClient();
   return apiClient.getVideoFileUrl(projectId);
+}
+
+function getFilenameFromContentDisposition(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const utf8Match = value.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    return decodeURIComponent(utf8Match[1]);
+  }
+
+  const asciiMatch = value.match(/filename="?([^"]+)"?/i);
+  return asciiMatch?.[1] ?? null;
+}
+
+export function getGenerationTaskStarter(stage: GenerationStage) {
+  switch (stage) {
+    case 'images':
+      return batchGenerateImages;
+    case 'dialogues':
+      return batchGenerateDialogues;
+    case 'audio':
+      return batchGenerateAudio;
+    case 'video':
+      return generateVideo;
+  }
+}
+
+export async function downloadVideoFile(projectId: string) {
+  const apiClient = getApiClient();
+  const response = await apiClient.getVideoFile(projectId);
+  if (!response.ok) {
+    let message = response.statusText || 'Failed to download video';
+
+    try {
+      const payload = (await response.json()) as { message?: string };
+      message = payload.message || message;
+    } catch {
+      // Ignore parse failure and use status text fallback.
+    }
+
+    throw new Error(message);
+  }
+
+  const blob = await response.blob();
+  const filename =
+    getFilenameFromContentDisposition(response.headers.get('Content-Disposition')) ??
+    `${projectId}.mp4`;
+
+  return { blob, filename };
 }

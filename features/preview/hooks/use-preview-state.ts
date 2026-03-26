@@ -1,6 +1,13 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import type { Dialogue, PPTPlan, TaskProgress } from '@/features/projects/types';
+import type {
+  Dialogue,
+  GenerationSessionMode,
+  GenerationSessionState,
+  GenerationStage,
+  PPTPlan,
+  TaskProgress,
+} from '@/features/projects/types';
 import {
   addDialogue,
   batchGenerateAudio,
@@ -8,6 +15,7 @@ import {
   batchGenerateImages,
   cancelTask,
   deleteDialogue,
+  downloadVideoFile,
   generateDialogues,
   generateSlideAudio,
   generateSlideImage,
@@ -16,12 +24,27 @@ import {
   getSlideAudioUrl,
   getSlideImageUrl,
   getTask,
-  getVideoUrl,
   listDialogues,
   reorderDialogues,
   updateDialogue,
 } from '@/features/projects/api';
 import { getPageParamFromSlideIndex, getSlideIndexFromPageParam } from '@/features/projects/utils';
+import {
+  advanceGenerationSession,
+  attachTaskToGenerationStage,
+  clearGenerationSession,
+  createGenerationSession,
+  finalizeGenerationSession,
+  getCurrentGenerationStageState,
+  getGenerationOverallProgress,
+  getGenerationStageLabel,
+  getNextGenerationStage,
+  getTaskProgressPercent,
+  isGenerationSessionActive,
+  loadGenerationSession,
+  markGenerationStageCompleted,
+  persistGenerationSession,
+} from '@/features/preview/utils/generation-session';
 import { normalizeDialogues } from '../utils';
 
 const POLL_INTERVAL_MS = 1500;
@@ -35,16 +58,41 @@ function dialoguesDiffer(left: Dialogue, right: Dialogue) {
   );
 }
 
+function createErroredSession(
+  projectId: string,
+  mode: GenerationSessionMode,
+  stage: GenerationStage,
+  message: string,
+) {
+  const base = createGenerationSession(projectId, mode, stage, null);
+
+  return {
+    ...base,
+    status: 'failed' as const,
+    errorMessage: message,
+    stages: base.stages.map((item) =>
+      item.stage === stage ? { ...item, status: 'failed' as const, progress: 0 } : item,
+    ),
+    updatedAt: Date.now(),
+  };
+}
+
 export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: string | null) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [plan, setPlan] = useState<PPTPlan | null>(null);
-  const [projectId, setProjectId] = useState<string>(projectIdFromUrl || '');
+  const [projectId, setProjectId] = useState(projectIdFromUrl || '');
+  const [projectVideoPath, setProjectVideoPath] = useState<string | undefined>();
   const [currentSlideIndex, setCurrentSlideIndexState] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingDialogues, setIsSavingDialogues] = useState(false);
-  const [activeTask, setActiveTask] = useState<TaskProgress | null>(null);
+  const [generationSession, setGenerationSession] = useState<GenerationSessionState | null>(null);
+  const generationSessionRef = useRef<GenerationSessionState | null>(null);
+
+  useEffect(() => {
+    generationSessionRef.current = generationSession;
+  }, [generationSession]);
 
   const setCurrentSlideIndex = useCallback(
     (nextIndex: number) => {
@@ -56,33 +104,103 @@ export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: st
     [pathname, router, searchParams],
   );
 
-  const refreshPlan = useCallback(async () => {
-    if (!projectId) return;
+  const commitGenerationSession = useCallback(
+    (nextSession: GenerationSessionState | null) => {
+      generationSessionRef.current = nextSession;
+      setGenerationSession(nextSession);
+
+      const storageProjectId = nextSession?.projectId ?? projectId;
+      if (!storageProjectId) {
+        return;
+      }
+
+      if (nextSession) {
+        persistGenerationSession(nextSession);
+      } else {
+        clearGenerationSession(storageProjectId);
+      }
+    },
+    [projectId],
+  );
+
+  const refreshProject = useCallback(async () => {
+    if (!projectId) return null;
     const project = await getProject(projectId);
     setPlan(project.pptPlan ?? null);
+    setProjectVideoPath(project.videoPath ?? undefined);
+    return project;
   }, [projectId]);
+
+  const startStageTask = useCallback(
+    async (
+      stage: GenerationStage,
+      mode: GenerationSessionMode,
+      baseSession?: GenerationSessionState | null,
+    ) => {
+      if (!projectId) return;
+
+      const startTask = {
+        images: batchGenerateImages,
+        dialogues: batchGenerateDialogues,
+        audio: batchGenerateAudio,
+        video: generateVideo,
+      }[stage];
+
+      try {
+        const taskId = await startTask(projectId);
+        const task = await getTask(taskId);
+        const nextSession = baseSession
+          ? attachTaskToGenerationStage(
+              {
+                ...baseSession,
+                mode,
+                status: 'running',
+                currentStage: stage,
+                activeTask: null,
+                errorMessage: null,
+              },
+              stage,
+              task,
+            )
+          : createGenerationSession(projectId, mode, stage, task);
+
+        commitGenerationSession(nextSession);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : `启动${getGenerationStageLabel(stage)}任务失败`;
+        commitGenerationSession(createErroredSession(projectId, mode, stage, message));
+      }
+    },
+    [commitGenerationSession, projectId],
+  );
 
   useEffect(() => {
     const loadPlan = async () => {
       try {
         if (!projectIdFromUrl) {
+          setProjectId('');
           setPlan(null);
+          setProjectVideoPath(undefined);
+          commitGenerationSession(null);
           return;
         }
+
         setProjectId(projectIdFromUrl);
         const project = await getProject(projectIdFromUrl);
         setPlan(project.pptPlan ?? null);
+        setProjectVideoPath(project.videoPath ?? undefined);
         setCurrentSlideIndexState(getSlideIndexFromPageParam(pageFromUrl, project.pptPlan?.slides.length ?? 0));
+        commitGenerationSession(loadGenerationSession(projectIdFromUrl));
       } catch (error) {
         console.error('Failed to load preview plan:', error);
         setPlan(null);
+        setProjectVideoPath(undefined);
       } finally {
         setIsLoading(false);
       }
     };
 
     void loadPlan();
-  }, [pageFromUrl, projectIdFromUrl]);
+  }, [commitGenerationSession, pageFromUrl, projectIdFromUrl]);
 
   useEffect(() => {
     if (!plan) return;
@@ -106,30 +224,129 @@ export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: st
   }, [pageFromUrl, pathname, plan, router, searchParams]);
 
   useEffect(() => {
-    if (!activeTask || !['pending', 'running'].includes(activeTask.status)) return;
+    const restoredSession = generationSessionRef.current;
+    if (!restoredSession || restoredSession.status !== 'running' || !projectId) {
+      return;
+    }
+
+    const currentStage = restoredSession.currentStage;
+    const currentStageState = getCurrentGenerationStageState(restoredSession);
+    const activeTaskId = restoredSession.activeTask?.id ?? currentStageState?.taskId;
+
+    if (activeTaskId || !currentStage || restoredSession.mode !== 'pipeline') {
+      return;
+    }
+
+    if (currentStageState?.status === 'completed') {
+      const nextStage = getNextGenerationStage(currentStage);
+      if (nextStage) {
+        void startStageTask(nextStage, restoredSession.mode, restoredSession);
+      }
+    }
+  }, [projectId, startStageTask]);
+
+  useEffect(() => {
+    const activeSession = generationSession;
+    if (!activeSession || activeSession.status !== 'running') {
+      return;
+    }
+
+    const taskId = activeSession.activeTask?.id ?? getCurrentGenerationStageState(activeSession)?.taskId;
+    if (!taskId) {
+      return;
+    }
 
     let cancelled = false;
-    const intervalId = window.setInterval(async () => {
-      try {
-        const nextTask = await getTask(activeTask.id);
-        if (cancelled) return;
-        setActiveTask(nextTask);
+    let intervalId = 0;
 
-        if (!['pending', 'running'].includes(nextTask.status)) {
-          window.clearInterval(intervalId);
-          await refreshPlan();
+    const pollTask = async () => {
+      try {
+        const nextTask = await getTask(taskId);
+        if (cancelled) return;
+
+        const currentSession = generationSessionRef.current;
+        if (!currentSession) {
+          return;
         }
+
+        const updatedSession = updateAndPersistCurrentTask(currentSession, nextTask);
+
+        if (nextTask.status === 'pending' || nextTask.status === 'running') {
+          return;
+        }
+
+        window.clearInterval(intervalId);
+        await refreshProject();
+
+        if (nextTask.status === 'completed') {
+          await completeGenerationSession(updatedSession, nextTask);
+          return;
+        }
+
+        commitGenerationSession(
+          finalizeGenerationSession(
+            updatedSession,
+            nextTask.status === 'cancelled' ? 'cancelled' : 'failed',
+            nextTask,
+          ),
+        );
       } catch (error) {
         console.error('Failed to poll task:', error);
         window.clearInterval(intervalId);
       }
+    };
+
+    const updateAndPersistCurrentTask = (
+      currentSession: GenerationSessionState,
+      nextTask: TaskProgress,
+    ) => {
+      const nextSession = attachTaskToGenerationStage(
+        {
+          ...currentSession,
+          activeTask: nextTask,
+        },
+        currentSession.currentStage ?? activeSession.currentStage ?? 'images',
+        nextTask,
+      );
+      commitGenerationSession(nextSession);
+      return nextSession;
+    };
+
+    const completeGenerationSession = async (
+      currentSession: GenerationSessionState,
+      nextTask: TaskProgress,
+    ) => {
+      const activeStage = currentSession.currentStage;
+      if (!activeStage) {
+        commitGenerationSession(finalizeGenerationSession(currentSession, 'completed', nextTask));
+        return;
+      }
+
+      const completedSession = markGenerationStageCompleted(currentSession, activeStage);
+
+      if (completedSession.mode === 'pipeline') {
+        const nextStage = getNextGenerationStage(activeStage);
+        if (nextStage) {
+          const advancedSession = advanceGenerationSession(completedSession, nextStage);
+          commitGenerationSession(advancedSession);
+          await startStageTask(nextStage, 'pipeline', advancedSession);
+          return;
+        }
+      }
+
+      commitGenerationSession(finalizeGenerationSession(completedSession, 'completed', nextTask));
+    };
+
+    void pollTask();
+    intervalId = window.setInterval(() => {
+      void pollTask();
     }, POLL_INTERVAL_MS);
 
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [activeTask, refreshPlan]);
+  }, [commitGenerationSession, generationSession, refreshProject, startStageTask]);
 
   const currentSlide = plan?.slides[currentSlideIndex];
 
@@ -158,12 +375,9 @@ export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: st
     return () => {
       cancelled = true;
     };
-  }, [currentSlide?.id, currentSlide?.dialogues, projectId]);
+  }, [currentSlide?.dialogues, currentSlide?.id, projectId]);
 
-  const displayDialogues = useMemo(() => {
-    if (!currentSlide?.dialogues) return [];
-    return currentSlide.dialogues;
-  }, [currentSlide]);
+  const displayDialogues = useMemo(() => currentSlide?.dialogues ?? [], [currentSlide]);
 
   const replaceSlideDialoguesInState = useCallback((slideId: string, dialogues: Dialogue[]) => {
     setPlan((prev) => {
@@ -174,52 +388,49 @@ export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: st
     });
   }, []);
 
-  const runTaskAction = useCallback(async (startTask: () => Promise<string>) => {
-    const taskId = await startTask();
-    const task = await getTask(taskId);
-    setActiveTask(task);
-  }, []);
-
   const handleGenerateDialogues = useCallback(async () => {
     if (!projectId || !currentSlide?.id) return;
     try {
       const dialogues = normalizeDialogues(await generateDialogues(projectId, currentSlide.id));
       replaceSlideDialoguesInState(currentSlide.id, dialogues);
-      await refreshPlan();
+      await refreshProject();
     } catch (error) {
       console.error('Failed to generate dialogues:', error);
     }
-  }, [currentSlide?.id, projectId, refreshPlan, replaceSlideDialoguesInState]);
+  }, [currentSlide?.id, projectId, refreshProject, replaceSlideDialoguesInState]);
 
-  const handleGenerateAllDialogues = useCallback(async () => {
-    if (!projectId) return;
-    await runTaskAction(() => batchGenerateDialogues(projectId));
-  }, [projectId, runTaskAction]);
+  const handleStartStageGeneration = useCallback(
+    async (stage: GenerationStage) => {
+      if (!projectId || isGenerationSessionActive(generationSessionRef.current)) {
+        return;
+      }
 
-  const handleGenerateAllImages = useCallback(async () => {
-    if (!projectId) return;
-    await runTaskAction(() => batchGenerateImages(projectId));
-  }, [projectId, runTaskAction]);
+      await startStageTask(stage, 'single-stage');
+    },
+    [projectId, startStageTask],
+  );
 
-  const handleGenerateAllAudio = useCallback(async () => {
-    if (!projectId) return;
-    await runTaskAction(() => batchGenerateAudio(projectId));
-  }, [projectId, runTaskAction]);
+  const handleGenerateAll = useCallback(async () => {
+    if (!projectId || isGenerationSessionActive(generationSessionRef.current)) {
+      return;
+    }
 
-  const handleGenerateVideo = useCallback(async () => {
-    if (!projectId) return;
-    await runTaskAction(() => generateVideo(projectId));
-  }, [projectId, runTaskAction]);
+    await startStageTask('images', 'pipeline');
+  }, [projectId, startStageTask]);
 
   const handleStopGeneration = useCallback(async () => {
-    if (!activeTask) return;
+    const activeTaskId = generationSessionRef.current?.activeTask?.id;
+    if (!activeTaskId) return;
+
     try {
-      const cancelledTask = await cancelTask(activeTask.id);
-      setActiveTask(cancelledTask);
+      const cancelledTask = await cancelTask(activeTaskId);
+      const currentSession = generationSessionRef.current;
+      if (!currentSession) return;
+      commitGenerationSession(finalizeGenerationSession(currentSession, 'cancelled', cancelledTask));
     } catch (error) {
       console.error('Failed to cancel task:', error);
     }
-  }, [activeTask]);
+  }, [commitGenerationSession]);
 
   const handleSaveManualDialogues = useCallback(
     async (dialogues: Dialogue[]) => {
@@ -276,21 +487,21 @@ export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: st
     if (!projectId || !currentSlide?.id) return;
     try {
       await generateSlideImage(projectId, currentSlide.id);
-      await refreshPlan();
+      await refreshProject();
     } catch (error) {
       console.error('Failed to generate image:', error);
     }
-  }, [currentSlide?.id, projectId, refreshPlan]);
+  }, [currentSlide?.id, projectId, refreshProject]);
 
   const handleGenerateAudio = useCallback(async () => {
     if (!projectId || !currentSlide?.id) return;
     try {
       await generateSlideAudio(projectId, currentSlide.id);
-      await refreshPlan();
+      await refreshProject();
     } catch (error) {
       console.error('Failed to generate audio:', error);
     }
-  }, [currentSlide?.id, projectId, refreshPlan]);
+  }, [currentSlide?.id, projectId, refreshProject]);
 
   const handleOpenSlideAudio = useCallback(() => {
     if (!projectId || !currentSlide?.id) return;
@@ -302,22 +513,38 @@ export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: st
     window.open(getSlideImageUrl(projectId, currentSlide.id), '_blank', 'noopener,noreferrer');
   }, [currentSlide?.id, projectId]);
 
-  const handleOpenVideo = useCallback(() => {
+  const handleDownloadVideo = useCallback(async () => {
     if (!projectId) return;
-    window.open(getVideoUrl(projectId), '_blank', 'noopener,noreferrer');
+
+    try {
+      const { blob, filename } = await downloadVideoFile(projectId);
+      const objectUrl = window.URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      console.error('Failed to download video:', error);
+    }
   }, [projectId]);
 
-  const generationProgress = useMemo(() => {
-    if (!activeTask || activeTask.totalSteps <= 0) {
-      return { current: 0, total: 0, failed: activeTask?.status === 'failed' ? 1 : 0 };
+  const currentGenerationStage = getCurrentGenerationStageState(generationSession);
+  const overallGenerationProgress = useMemo(
+    () => getGenerationOverallProgress(generationSession),
+    [generationSession],
+  );
+  const currentStageTaskProgress = useMemo(() => {
+    if (!generationSession?.activeTask) {
+      return currentGenerationStage?.progress ?? 0;
     }
 
-    return {
-      current: activeTask.currentStep,
-      total: activeTask.totalSteps,
-      failed: activeTask.status === 'failed' ? 1 : 0,
-    };
-  }, [activeTask]);
+    return generationSession.activeTask.status === 'completed'
+      ? 100
+      : getTaskProgressPercent(generationSession.activeTask);
+  }, [currentGenerationStage?.progress, generationSession?.activeTask]);
 
   return {
     plan,
@@ -325,24 +552,24 @@ export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: st
     currentSlideIndex,
     setCurrentSlideIndex,
     isLoading,
-    isGeneratingAll: Boolean(activeTask && ['pending', 'running'].includes(activeTask.status)),
+    isGeneratingAll: isGenerationSessionActive(generationSession),
     isSavingDialogues,
-    generationProgress,
-    activeTask,
+    generationSession,
+    overallGenerationProgress,
+    currentStageTaskProgress,
     currentSlide,
     displayDialogues,
+    projectVideoPath,
     handleGenerateDialogues,
-    handleGenerateAllDialogues,
-    handleGenerateAllImages,
-    handleGenerateAllAudio,
-    handleGenerateVideo,
+    handleGenerateAll,
+    handleStartStageGeneration,
     handleStopGeneration,
-    handleForceRefresh: refreshPlan,
+    handleForceRefresh: refreshProject,
     handleSaveManualDialogues,
     handleGenerateImage,
     handleGenerateAudio,
     handleOpenSlideAudio,
     handleOpenSlideImage,
-    handleOpenVideo,
+    handleDownloadVideo,
   };
 }

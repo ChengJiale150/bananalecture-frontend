@@ -22,15 +22,14 @@ function PreviewContent() {
     isLoading,
     isGeneratingAll,
     isSavingDialogues,
-    generationProgress,
-    activeTask,
+    generationSession,
+    overallGenerationProgress,
+    currentStageTaskProgress,
     currentSlide,
     displayDialogues,
     handleGenerateDialogues,
-    handleGenerateAllDialogues,
-    handleGenerateAllImages,
-    handleGenerateAllAudio,
-    handleGenerateVideo,
+    handleGenerateAll,
+    handleStartStageGeneration,
     handleStopGeneration,
     handleForceRefresh,
     handleSaveManualDialogues,
@@ -38,7 +37,8 @@ function PreviewContent() {
     handleGenerateAudio,
     handleOpenSlideAudio,
     handleOpenSlideImage,
-    handleOpenVideo,
+    handleDownloadVideo,
+    projectVideoPath,
   } = usePreviewState(projectIdFromUrl, pageFromUrl);
 
   if (isLoading) {
@@ -57,20 +57,20 @@ function PreviewContent() {
 
   return (
     <div className="h-screen bg-[#F0F8FF] flex flex-col overflow-hidden">
-      <PreviewHeader 
-        plan={plan}
-        currentSlideIndex={currentSlideIndex}
-        isGeneratingAll={isGeneratingAll}
-        generationProgress={generationProgress}
-        activeTask={activeTask}
-        handleStopGeneration={handleStopGeneration}
-        handleGenerateAllDialogues={handleGenerateAllDialogues}
-        handleGenerateAllImages={handleGenerateAllImages}
-        handleGenerateAllAudio={handleGenerateAllAudio}
-        handleGenerateVideo={handleGenerateVideo}
-        handleOpenVideo={handleOpenVideo}
-        handleForceRefresh={handleForceRefresh}
-      />
+        <PreviewHeader 
+          plan={plan}
+          currentSlideIndex={currentSlideIndex}
+          isGeneratingAll={isGeneratingAll}
+          generationSession={generationSession}
+          overallGenerationProgress={overallGenerationProgress}
+          currentStageTaskProgress={currentStageTaskProgress}
+          hasVideo={Boolean(projectVideoPath)}
+          handleStopGeneration={handleStopGeneration}
+          handleGenerateAll={handleGenerateAll}
+          handleStartStageGeneration={handleStartStageGeneration}
+          handleDownloadVideo={handleDownloadVideo}
+          handleForceRefresh={handleForceRefresh}
+        />
 
       {plan && plan.slides.length > 0 && currentSlide ? (
         <div className="flex-1 flex overflow-hidden">

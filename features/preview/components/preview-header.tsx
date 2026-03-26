@@ -1,44 +1,94 @@
-import { ArrowLeft, Sparkles, Video, Settings, ChevronDown, FileText, Image as ImageIcon, Volume2, ExternalLink, RefreshCw, Square } from 'lucide-react';
+import {
+  ArrowLeft,
+  ChevronDown,
+  Download,
+  FileText,
+  Image as ImageIcon,
+  RefreshCw,
+  Settings,
+  Sparkles,
+  Square,
+  Video,
+  Volume2,
+} from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
-import type { PPTPlan, TaskProgress } from '@/features/projects/types';
+import { useMemo, useState } from 'react';
+import type { GenerationSessionState, GenerationStage, PPTPlan } from '@/features/projects/types';
+import { getCurrentGenerationStageState } from '@/features/preview/utils/generation-session';
 
 interface PreviewHeaderProps {
   plan: PPTPlan | null;
   currentSlideIndex: number;
   isGeneratingAll: boolean;
-  generationProgress: { current: number; total: number; failed: number };
-  activeTask: TaskProgress | null;
+  generationSession: GenerationSessionState | null;
+  overallGenerationProgress: number;
+  currentStageTaskProgress: number;
+  hasVideo: boolean;
   handleStopGeneration: () => void;
-  handleGenerateAllDialogues: () => void;
-  handleGenerateAllImages: () => void;
-  handleGenerateAllAudio: () => void;
-  handleGenerateVideo: () => void;
-  handleOpenVideo: () => void;
+  handleGenerateAll: () => void;
+  handleStartStageGeneration: (stage: GenerationStage) => void;
+  handleDownloadVideo: () => void;
   handleForceRefresh: () => void;
+}
+
+const ADVANCED_ACTIONS: Array<{ stage: GenerationStage; label: string; icon: typeof ImageIcon }> = [
+  { stage: 'images', label: '一键生成图片', icon: ImageIcon },
+  { stage: 'dialogues', label: '一键生成口播稿', icon: FileText },
+  { stage: 'audio', label: '一键生成音频', icon: Volume2 },
+  { stage: 'video', label: '一键生成视频', icon: Video },
+];
+
+function getStatusCopy(session: GenerationSessionState | null) {
+  if (!session) {
+    return '当前没有批量生成任务';
+  }
+
+  const currentStage = getCurrentGenerationStageState(session);
+  if (!currentStage) {
+    return '生成任务已结束';
+  }
+
+  const prefix = session.mode === 'pipeline' ? '一键生成' : '单阶段生成';
+  switch (session.status) {
+    case 'completed':
+      return `${prefix}已完成`;
+    case 'failed':
+      return `${prefix}失败: ${session.errorMessage ?? `${currentStage.label}任务失败`}`;
+    case 'cancelled':
+      return `${prefix}已停止`;
+    default:
+      return `${prefix}进行中: ${currentStage.label} ${Math.round(currentStage.progress)}%`;
+  }
 }
 
 export function PreviewHeader({
   plan,
   currentSlideIndex,
   isGeneratingAll,
-  generationProgress,
-  activeTask,
+  generationSession,
+  overallGenerationProgress,
+  currentStageTaskProgress,
+  hasVideo,
   handleStopGeneration,
-  handleGenerateAllDialogues,
-  handleGenerateAllImages,
-  handleGenerateAllAudio,
-  handleGenerateVideo,
-  handleOpenVideo,
+  handleGenerateAll,
+  handleStartStageGeneration,
+  handleDownloadVideo,
   handleForceRefresh,
 }: PreviewHeaderProps) {
   const router = useRouter();
   const [showAdvancedTools, setShowAdvancedTools] = useState(false);
-  const isTaskRunning = Boolean(activeTask && ['pending', 'running'].includes(activeTask.status));
+  const currentStage = getCurrentGenerationStageState(generationSession);
+  const progressText = useMemo(() => {
+    if (generationSession) {
+      return `${Math.round(overallGenerationProgress)}%`;
+    }
+
+    return `${plan ? Math.round(((currentSlideIndex + 1) / plan.slides.length) * 100) : 0}%`;
+  }, [currentSlideIndex, generationSession, overallGenerationProgress, plan]);
 
   return (
     <header className="bg-white border-b-4 border-gray-900 shadow-sm flex-none z-10 relative">
-      <div className="px-6 py-3 flex items-center justify-between">
+      <div className="px-6 py-4 flex items-start justify-between gap-4">
         <div className="flex items-center gap-4">
           <button
             onClick={() => router.back()}
@@ -47,79 +97,67 @@ export function PreviewHeader({
           >
             <ArrowLeft size={18} />
           </button>
-          <button 
-            onClick={() => {
-              handleGenerateAllDialogues();
-            }}
-            className="flex items-center gap-2 px-6 py-2 bg-[var(--doraemon-blue)] text-white font-black rounded-full border-2 border-gray-900 hover:brightness-110 transition-all shadow-[3px_3px_0px_rgba(0,0,0,1)]"
+          <button
+            onClick={handleGenerateAll}
+            disabled={isGeneratingAll}
+            className={`flex items-center gap-2 px-6 py-3 text-white font-black rounded-full border-2 border-gray-900 transition-all shadow-[3px_3px_0px_rgba(0,0,0,1)] ${
+              isGeneratingAll
+                ? 'bg-gray-400 cursor-not-allowed'
+                : 'bg-[var(--doraemon-blue)] hover:brightness-110'
+            }`}
           >
             <Sparkles size={18} />
-            {isTaskRunning ? '任务进行中' : '一键生成'}
+            {isGeneratingAll ? '生成进行中' : '一键生成'}
           </button>
           <button
-            onClick={handleGenerateVideo}
-            className="flex items-center gap-2 px-6 py-2 bg-white text-orange-500 font-bold rounded-full border-2 border-orange-500 hover:bg-orange-50 transition-all"
+            onClick={handleDownloadVideo}
+            disabled={!hasVideo}
+            className={`flex items-center gap-2 px-6 py-3 font-bold rounded-full border-2 transition-all ${
+              hasVideo
+                ? 'bg-white text-orange-500 border-orange-500 hover:bg-orange-50'
+                : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+            }`}
           >
-            <Video size={18} />
-            导出视频
+            <Download size={18} />
+            下载视频
           </button>
         </div>
 
         <div className="flex items-center gap-4 relative">
           <div className="relative">
-            <button 
-              onClick={() => setShowAdvancedTools(!showAdvancedTools)}
+            <button
+              onClick={() => setShowAdvancedTools((value) => !value)}
               className="flex items-center gap-2 px-4 py-2 bg-white text-orange-500 font-bold rounded-full border-2 border-orange-500 hover:bg-orange-50 transition-all"
             >
               <Settings size={18} />
-              高级工具 <ChevronDown size={16} />
+              高级功能 <ChevronDown size={16} />
             </button>
             {showAdvancedTools && (
-              <div className="absolute top-full mt-2 right-0 bg-white border-2 border-[var(--doraemon-blue)] rounded-xl shadow-lg w-48 overflow-hidden z-50">
-                <button 
-                  onClick={() => {
-                    handleGenerateAllDialogues();
-                    setShowAdvancedTools(false);
-                  }}
-                  className="w-full flex items-center gap-2 px-4 py-3 text-[var(--doraemon-blue)] hover:bg-blue-50 border-b border-gray-100"
-                >
-                  <FileText size={16} />
-                  一键生成口播稿
-                </button>
-                <button
-                  onClick={() => {
-                    handleGenerateAllImages();
-                    setShowAdvancedTools(false);
-                  }}
-                  className="w-full flex items-center gap-2 px-4 py-3 text-[var(--doraemon-blue)] hover:bg-blue-50 border-b border-gray-100"
-                >
-                  <ImageIcon size={16} />
-                  一键生成图片
-                </button>
-                <button
-                  onClick={() => {
-                    handleGenerateAllAudio();
-                    setShowAdvancedTools(false);
-                  }}
-                  className="w-full flex items-center gap-2 px-4 py-3 text-[var(--doraemon-blue)] hover:bg-blue-50 border-b border-gray-100"
-                >
-                  <Volume2 size={16} />
-                  一键生成音频
-                </button>
-                <button
-                  onClick={() => {
-                    handleOpenVideo();
-                    setShowAdvancedTools(false);
-                  }}
-                  className="w-full flex items-center gap-2 px-4 py-3 text-[var(--doraemon-blue)] hover:bg-blue-50"
-                >
-                  <ExternalLink size={16} />
-                  打开视频
-                </button>
+              <div className="absolute top-full mt-2 right-0 bg-white border-2 border-[var(--doraemon-blue)] rounded-xl shadow-lg w-56 overflow-hidden z-50">
+                {ADVANCED_ACTIONS.map((action, index) => {
+                  const Icon = action.icon;
+
+                  return (
+                    <button
+                      key={action.stage}
+                      onClick={() => {
+                        void handleStartStageGeneration(action.stage);
+                        setShowAdvancedTools(false);
+                      }}
+                      disabled={isGeneratingAll}
+                      className={`w-full flex items-center gap-2 px-4 py-3 text-left text-[var(--doraemon-blue)] hover:bg-blue-50 ${
+                        index < ADVANCED_ACTIONS.length - 1 ? 'border-b border-gray-100' : ''
+                      } ${isGeneratingAll ? 'cursor-not-allowed bg-gray-50 text-gray-300' : ''}`}
+                    >
+                      <Icon size={16} />
+                      {action.label}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
-          <button 
+          <button
             onClick={handleForceRefresh}
             className="flex items-center gap-2 px-4 py-2 bg-white text-green-500 font-bold rounded-full border-2 border-green-500 hover:bg-green-50 transition-all"
           >
@@ -128,43 +166,92 @@ export function PreviewHeader({
           </button>
         </div>
       </div>
-      
-      {/* Progress Bar */}
-      <div className="px-6 pb-3">
-        <div className="flex items-center gap-4">
-          <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
-            <div 
-              className={`h-full transition-all duration-500 ease-out ${isGeneratingAll ? 'bg-green-500' : 'bg-[var(--doraemon-blue)]'}`}
-              style={{ 
-                width: `${
-                  isGeneratingAll && generationProgress.total > 0
-                    ? (generationProgress.current / generationProgress.total) * 100 
-                    : (plan ? ((currentSlideIndex + 1) / plan.slides.length) * 100 : 0)
-                }%` 
-              }}
-            ></div>
+
+      <div className="px-6 pb-4">
+        <div className="rounded-3xl border-2 border-gray-900 bg-[#F7FBFF] p-4 shadow-[4px_4px_0px_rgba(0,0,0,1)]">
+          <div className="flex items-center justify-between gap-4 mb-4">
+            <div>
+              <p className="text-sm font-black text-gray-900">生成进度</p>
+              <p className="text-sm text-gray-600">{getStatusCopy(generationSession)}</p>
+            </div>
+            <div className="flex items-center gap-3">
+              {generationSession && (
+                <div className="rounded-full border border-gray-300 bg-white px-3 py-1 text-xs font-bold text-gray-600">
+                  当前阶段 {Math.round(currentStageTaskProgress)}%
+                </div>
+              )}
+              <div className="rounded-full border border-gray-900 bg-white px-3 py-1 text-sm font-black text-gray-900">
+                {progressText}
+              </div>
+              {isGeneratingAll && (
+                <button
+                  onClick={handleStopGeneration}
+                  className="flex items-center gap-1 px-3 py-1 bg-red-100 text-red-600 rounded-lg text-sm font-bold hover:bg-red-200 transition-colors"
+                  title="停止生成"
+                >
+                  <Square size={14} fill="currentColor" />
+                  停止
+                </button>
+              )}
+            </div>
           </div>
-          <span className="text-sm font-bold text-gray-500 min-w-[40px]">
-            {isGeneratingAll && generationProgress.total > 0
-              ? `${Math.round((generationProgress.current / generationProgress.total) * 100)}%`
-              : `${plan ? Math.round(((currentSlideIndex + 1) / plan.slides.length) * 100) : 0}%`
-            }
-          </span>
-          {isGeneratingAll && (
-            <button
-              onClick={handleStopGeneration}
-              className="flex items-center gap-1 px-3 py-1 bg-red-100 text-red-600 rounded-lg text-sm font-bold hover:bg-red-200 transition-colors"
-              title="停止生成"
-            >
-              <Square size={14} fill="currentColor" />
-              停止
-            </button>
-          )}
-          {activeTask && (
-            <span className="text-xs text-gray-500">
-              {activeTask.type}: {activeTask.status}
-            </span>
-          )}
+
+          <div className="grid grid-cols-4 gap-3">
+            {(generationSession?.stages ?? []).map((stage) => {
+              const isActive = currentStage?.stage === stage.stage && generationSession?.status === 'running';
+              const backgroundClass =
+                stage.status === 'completed'
+                  ? 'bg-green-100 border-green-300'
+                  : stage.status === 'failed'
+                    ? 'bg-red-100 border-red-300'
+                    : stage.status === 'cancelled'
+                      ? 'bg-gray-100 border-gray-300'
+                      : isActive
+                        ? 'bg-blue-100 border-[var(--doraemon-blue)]'
+                        : 'bg-white border-gray-200';
+
+              return (
+                <div key={stage.stage} className={`rounded-2xl border-2 p-3 transition-all ${backgroundClass}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-black text-gray-900">{stage.label}</span>
+                    <span className="text-xs font-bold text-gray-500">{Math.round(stage.progress)}%</span>
+                  </div>
+                  <div className="h-2 bg-white/80 rounded-full overflow-hidden border border-white">
+                    <div
+                      className={`h-full transition-all duration-500 ${
+                        stage.status === 'failed'
+                          ? 'bg-red-500'
+                          : stage.status === 'cancelled'
+                            ? 'bg-gray-400'
+                            : stage.status === 'completed'
+                              ? 'bg-green-500'
+                              : 'bg-[var(--doraemon-blue)]'
+                      }`}
+                      style={{ width: `${stage.progress}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+            {!generationSession &&
+              ADVANCED_ACTIONS.map((action) => (
+                <div key={action.stage} className="rounded-2xl border-2 border-gray-200 bg-white p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-black text-gray-900">
+                      {action.stage === 'images'
+                        ? '图片'
+                        : action.stage === 'dialogues'
+                          ? '口播稿'
+                          : action.stage === 'audio'
+                            ? '音频'
+                            : '视频'}
+                    </span>
+                    <span className="text-xs font-bold text-gray-400">0%</span>
+                  </div>
+                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden border border-gray-200" />
+                </div>
+              ))}
+          </div>
         </div>
       </div>
     </header>
