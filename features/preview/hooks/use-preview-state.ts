@@ -41,7 +41,6 @@ import {
   getGenerationOverallProgress,
   getGenerationStageLabel,
   getNextGenerationStage,
-  getTaskProgressPercent,
   isGenerationSessionActive,
   loadGenerationSession,
   markGenerationStageCompleted,
@@ -581,20 +580,10 @@ export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: st
     }
   }, [projectId]);
 
-  const currentGenerationStage = getCurrentGenerationStageState(generationSession);
   const overallGenerationProgress = useMemo(
     () => getGenerationOverallProgress(generationSession),
     [generationSession],
   );
-  const currentStageTaskProgress = useMemo(() => {
-    if (!generationSession?.activeTask) {
-      return currentGenerationStage?.progress ?? 0;
-    }
-
-    return generationSession.activeTask.status === 'completed'
-      ? 100
-      : getTaskProgressPercent(generationSession.activeTask);
-  }, [currentGenerationStage?.progress, generationSession?.activeTask]);
 
   return {
     plan,
@@ -606,7 +595,6 @@ export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: st
     isDialogueActionPending: activeActionKey?.startsWith('dialogue-') ?? false,
     generationSession,
     overallGenerationProgress,
-    currentStageTaskProgress,
     currentSlide,
     displayDialogues,
     currentSlideImageUrl: slideImageUrl,

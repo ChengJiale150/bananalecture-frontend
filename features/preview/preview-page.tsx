@@ -24,7 +24,6 @@ function PreviewContent() {
     isDialogueActionPending,
     generationSession,
     overallGenerationProgress,
-    currentStageTaskProgress,
     currentSlide,
     displayDialogues,
     currentSlideImageUrl,
@@ -68,12 +67,9 @@ function PreviewContent() {
   return (
     <div className="h-screen bg-[#F0F8FF] flex flex-col overflow-hidden">
         <PreviewHeader 
-          plan={plan}
-          currentSlideIndex={currentSlideIndex}
           isGeneratingAll={isGeneratingAll}
           generationSession={generationSession}
           overallGenerationProgress={overallGenerationProgress}
-          currentStageTaskProgress={currentStageTaskProgress}
           hasVideo={Boolean(projectVideoPath)}
           handleStopGeneration={handleStopGeneration}
           handleGenerateAll={handleGenerateAll}

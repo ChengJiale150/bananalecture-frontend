@@ -220,23 +220,20 @@ export function getGenerationOverallProgress(session: GenerationSessionState | n
     return 0;
   }
 
-  const stageWeight = 100 / GENERATION_STAGES.length;
-
   if (session.mode === 'single-stage') {
     const activeStage = session.currentStage
       ? session.stages.find((stage) => stage.stage === session.currentStage)
       : null;
-    const activeIndex = session.currentStage ? GENERATION_STAGES.indexOf(session.currentStage) : -1;
 
-    if (!activeStage || activeIndex < 0) {
+    if (!activeStage) {
       return 0;
     }
 
-    const clampedProgress = Math.max(0, Math.min(100, activeStage.progress));
-    return activeIndex * stageWeight + (clampedProgress / 100) * stageWeight;
+    return Math.max(0, Math.min(100, activeStage.progress));
   }
 
-  return session.stages.reduce((total, stage, index) => {
+  const stageWeight = 100 / GENERATION_STAGES.length;
+  return session.stages.reduce((total, stage) => {
     if (stage.status === 'completed') {
       return total + stageWeight;
     }

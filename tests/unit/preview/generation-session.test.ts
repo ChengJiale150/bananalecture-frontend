@@ -53,7 +53,7 @@ test('single stage sessions only fill the selected stage range', () => {
   });
   const session = createGenerationSession('project-1', 'single-stage', 'audio', audioTask);
 
-  assert.equal(Math.round(getGenerationOverallProgress(session)), 63);
+  assert.equal(Math.round(getGenerationOverallProgress(session)), 50);
 });
 
 test('getNextGenerationStage follows the configured order', () => {
