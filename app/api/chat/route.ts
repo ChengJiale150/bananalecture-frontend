@@ -1,4 +1,4 @@
-import { createPlannerAgent } from '@/agent/planner/agent';
+import { createPlannerAgent } from '@/server/planner/create-planner-agent';
 import { createAgentUIStreamResponse } from 'ai';
 
 export async function POST(request: Request) {
