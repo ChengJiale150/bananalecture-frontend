@@ -1,33 +1,42 @@
 'use client';
 
 import { useChat } from '@ai-sdk/react';
-import ChatInput from '@/component/chat-input';
-import Sidebar from '@/component/sidebar';
-import ToolView from '@/component/tool-view';
-import PPTPlanPreview from '@/component/ppt-plan-preview';
-import type { PlannerAgentUIMessage } from '@/agent/planner/agent';
-import type { ProjectRecord, ProjectSummary, Slide } from '@/lib/project-types';
-import {
-  createProject,
-  deleteProject,
-  getProject,
-  listProjects,
-  renameProject,
-  replaceProjectSlides,
-  updateProjectMessages,
-  updateProjectTitleAndMessages,
-  updateSlide,
-  addSlide,
-  deleteSlide,
-  reorderSlides,
-} from '@/lib/project-api';
 import { useState, useEffect, useCallback, useRef, memo } from 'react';
 import { Loader2, BrainCircuit, ChevronDown, ChevronRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useRouter } from 'next/navigation';
+import ChatInput from '@/component/chat-input';
+import Sidebar from '@/component/sidebar';
+import ToolView from '@/component/tool-view';
+import PPTPlanPreview from '@/component/ppt-plan-preview';
+import type { PlannerAgentUIMessage } from '@/agent/planner/agent';
+import type { ProjectListPagination, ProjectRecord, ProjectSummary, Slide } from '@/lib/project-types';
+import {
+  addSlide,
+  createProject,
+  deleteProject,
+  deleteSlide,
+  getProject,
+  listProjects,
+  renameProject,
+  reorderSlides,
+  replaceProjectSlides,
+  updateProjectMessages,
+  updateProjectTitleAndMessages,
+  updateSlide,
+} from '@/lib/project-api';
+import { DEFAULT_PROJECT_LIST_PAGE, DEFAULT_PROJECT_LIST_PAGE_SIZE } from '@/lib/project-helpers';
 
 const DEFAULT_PROJECT_TITLE = 'New Project';
+const MESSAGE_SYNC_DELAY_MS = 800;
+
+const EMPTY_PAGINATION: ProjectListPagination = {
+  page: DEFAULT_PROJECT_LIST_PAGE,
+  pageSize: DEFAULT_PROJECT_LIST_PAGE_SIZE,
+  total: 0,
+  totalPages: 1,
+};
 
 const ThinkingBlock = memo(function ThinkingBlock({ content, isComplete }: { content: string; isComplete?: boolean }) {
   const [isOpen, setIsOpen] = useState(true);
@@ -77,6 +86,10 @@ function slideChanged(prev: Slide, next: Slide) {
     (prev.imagePath ?? '') !== (next.imagePath ?? '') ||
     (prev.audioPath ?? '') !== (next.audioPath ?? '')
   );
+}
+
+function serializeMessages(messages: any[]) {
+  return JSON.stringify(messages);
 }
 
 async function syncManualPlanChanges(projectId: string, previousPlan: { slides: Slide[] } | undefined, nextPlan: { slides: Slide[] }) {
@@ -133,14 +146,80 @@ function ChatInterface({
   const [pptPlan, setPptPlan] = useState(project.pptPlan);
   const processedToolCallIds = useRef<Set<string>>(new Set());
   const processedApprovalIds = useRef<Set<string>>(new Set());
-  const prevStatusRef = useRef(status);
   const hasInitializedToolCallsRef = useRef(false);
   const projectTitleRef = useRef(project.title);
+  const syncTimerRef = useRef<number | null>(null);
+  const latestMessagesRef = useRef<any[]>(project.messages ?? []);
+  const lastSyncedSignatureRef = useRef(serializeMessages(project.messages ?? []));
+  const isPersistingRef = useRef(false);
+  const shouldPersistAgainRef = useRef(false);
+
+  const persistMessages = useCallback(async () => {
+    if (isPersistingRef.current) {
+      shouldPersistAgainRef.current = true;
+      return;
+    }
+
+    isPersistingRef.current = true;
+
+    try {
+      do {
+        shouldPersistAgainRef.current = false;
+        const nextMessages = latestMessagesRef.current;
+        const nextSignature = serializeMessages(nextMessages);
+        const nextTitle =
+          projectTitleRef.current === DEFAULT_PROJECT_TITLE ? extractAutoTitle(nextMessages) : projectTitleRef.current;
+        const needsTitleUpdate = nextTitle !== projectTitleRef.current;
+
+        if (nextSignature === lastSyncedSignatureRef.current && !needsTitleUpdate) {
+          continue;
+        }
+
+        if (needsTitleUpdate) {
+          await updateProjectTitleAndMessages(chatId, nextTitle, nextMessages);
+          projectTitleRef.current = nextTitle;
+          lastSyncedSignatureRef.current = nextSignature;
+          onProjectUpdate({ id: chatId, title: nextTitle, messages: nextMessages, updatedAt: Date.now() });
+          continue;
+        }
+
+        await updateProjectMessages(chatId, nextMessages);
+        lastSyncedSignatureRef.current = nextSignature;
+        onProjectUpdate({ id: chatId, messages: nextMessages, updatedAt: Date.now() });
+      } while (shouldPersistAgainRef.current);
+    } catch (error) {
+      console.error('Failed to persist project messages:', error);
+    } finally {
+      isPersistingRef.current = false;
+    }
+  }, [chatId, onProjectUpdate]);
+
+  const schedulePersist = useCallback(
+    (immediate = false) => {
+      if (syncTimerRef.current) {
+        window.clearTimeout(syncTimerRef.current);
+      }
+
+      if (immediate) {
+        void persistMessages();
+        return;
+      }
+
+      syncTimerRef.current = window.setTimeout(() => {
+        syncTimerRef.current = null;
+        void persistMessages();
+      }, MESSAGE_SYNC_DELAY_MS);
+    },
+    [persistMessages],
+  );
 
   useEffect(() => {
     setMessages(project.messages ?? []);
+    latestMessagesRef.current = project.messages ?? [];
+    lastSyncedSignatureRef.current = serializeMessages(project.messages ?? []);
     setPptPlan(project.pptPlan);
     projectTitleRef.current = project.title;
+
     const restoredToolCallIds = new Set<string>();
     (project.messages ?? []).forEach((message: any) => {
       const parts = message?.parts;
@@ -157,6 +236,12 @@ function ChatInterface({
     });
     processedToolCallIds.current = restoredToolCallIds;
     hasInitializedToolCallsRef.current = true;
+
+    return () => {
+      if (syncTimerRef.current) {
+        window.clearTimeout(syncTimerRef.current);
+      }
+    };
   }, [project, setMessages]);
 
   const submitApproval = useCallback(
@@ -192,26 +277,21 @@ function ChatInterface({
   }, [autoApproveAfter, messages, submitApproval]);
 
   useEffect(() => {
-    if (prevStatusRef.current !== 'ready' && status === 'ready' && messages.length > 0) {
-      const save = async () => {
-        const nextTitle =
-          projectTitleRef.current === DEFAULT_PROJECT_TITLE ? extractAutoTitle(messages) : projectTitleRef.current;
+    latestMessagesRef.current = messages;
 
-        if (nextTitle !== projectTitleRef.current) {
-          projectTitleRef.current = nextTitle;
-          await updateProjectTitleAndMessages(chatId, nextTitle, messages);
-          onProjectUpdate({ id: chatId, title: nextTitle, messages });
-          return;
-        }
-
-        await updateProjectMessages(chatId, messages);
-        onProjectUpdate({ id: chatId, messages });
-      };
-
-      void save();
+    if (messages.length === 0) {
+      return;
     }
-    prevStatusRef.current = status;
-  }, [status, messages, chatId, onProjectUpdate]);
+
+    const nextSignature = serializeMessages(messages);
+    const mayNeedTitle = projectTitleRef.current === DEFAULT_PROJECT_TITLE && extractAutoTitle(messages) !== DEFAULT_PROJECT_TITLE;
+    if (nextSignature === lastSyncedSignatureRef.current && !mayNeedTitle) {
+      return;
+    }
+
+    const immediate = status !== 'streaming' && status !== 'submitted';
+    schedulePersist(immediate);
+  }, [messages, schedulePersist, status]);
 
   const handlePptPlanUpdate = useCallback(
     async (newPlan: { slides: Slide[] }) => {
@@ -236,7 +316,7 @@ function ChatInterface({
   );
 
   const handleOpenPreview = useCallback(() => {
-    router.push(`/preview?id=${chatId}&refresh=${Date.now()}`);
+    router.push(`/preview?id=${chatId}&page=1&refresh=${Date.now()}`);
   }, [chatId, router]);
 
   useEffect(() => {
@@ -420,32 +500,55 @@ function ChatInterface({
 
 export default function ChatPage() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [projectPagination, setProjectPagination] = useState<ProjectListPagination>(EMPTY_PAGINATION);
   const [currentProject, setCurrentProject] = useState<ProjectRecord | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [isLoadingProjects, setIsLoadingProjects] = useState(true);
+  const [isLoadingProjectDetail, setIsLoadingProjectDetail] = useState(false);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
 
-  const loadProjects = useCallback(async () => {
-    const data = await listProjects();
-    setProjects(data);
-    setLoading(false);
-    return data;
+  const loadProjectsPage = useCallback(async (page = DEFAULT_PROJECT_LIST_PAGE) => {
+    setIsLoadingProjects(true);
+    try {
+      const data = await listProjects({ page, page_size: DEFAULT_PROJECT_LIST_PAGE_SIZE });
+      setProjects(data.items);
+      setProjectPagination(data.pagination);
+      return data;
+    } finally {
+      setIsLoadingProjects(false);
+    }
   }, []);
 
   const refreshCurrentProject = useCallback(async (projectId: string) => {
-    const project = await getProject(projectId);
-    setCurrentProject(project);
+    setIsLoadingProjectDetail(true);
+    try {
+      const project = await getProject(projectId);
+      setCurrentProject(project);
+      return project;
+    } finally {
+      setIsLoadingProjectDetail(false);
+    }
   }, []);
 
   useEffect(() => {
-    void loadProjects();
-  }, [loadProjects]);
+    void loadProjectsPage(DEFAULT_PROJECT_LIST_PAGE);
+  }, [loadProjectsPage]);
 
   const handleSelectProject = useCallback(
     async (id: string) => {
-      if (id === currentProject?.id) return;
+      if (id === currentProject?.id && currentProject) return;
       await refreshCurrentProject(id);
     },
-    [currentProject?.id, refreshCurrentProject],
+    [currentProject, refreshCurrentProject],
+  );
+
+  const handlePageChange = useCallback(
+    async (page: number) => {
+      if (page < 1 || page > projectPagination.totalPages || page === projectPagination.page) {
+        return;
+      }
+      await loadProjectsPage(page);
+    },
+    [loadProjectsPage, projectPagination.page, projectPagination.totalPages],
   );
 
   const handleNewProject = useCallback(async () => {
@@ -453,65 +556,77 @@ export default function ChatPage() {
     setIsCreatingProject(true);
     try {
       const projectId = await createProject({ name: DEFAULT_PROJECT_TITLE });
-      await loadProjects();
+      await loadProjectsPage(DEFAULT_PROJECT_LIST_PAGE);
       await refreshCurrentProject(projectId);
     } finally {
       setIsCreatingProject(false);
     }
-  }, [isCreatingProject, loadProjects, refreshCurrentProject]);
+  }, [isCreatingProject, loadProjectsPage, refreshCurrentProject]);
 
   const handleDeleteProject = useCallback(
     async (id: string) => {
       await deleteProject(id);
+
       if (currentProject?.id === id) {
         setCurrentProject(null);
       }
-      const nextProjects = await loadProjects();
-      if (currentProject?.id === id && nextProjects.length > 0) {
-        await refreshCurrentProject(nextProjects[0].id);
+
+      let nextPage = projectPagination.page;
+      let nextProjectsPage = await loadProjectsPage(nextPage);
+
+      if (nextProjectsPage.items.length === 0 && nextPage > 1) {
+        nextPage -= 1;
+        nextProjectsPage = await loadProjectsPage(nextPage);
+      }
+
+      if (currentProject?.id === id) {
+        if (nextProjectsPage.items.length > 0) {
+          await refreshCurrentProject(nextProjectsPage.items[0].id);
+          return;
+        }
+
+        await handleNewProject();
       }
     },
-    [currentProject?.id, loadProjects, refreshCurrentProject],
+    [currentProject?.id, handleNewProject, loadProjectsPage, projectPagination.page, refreshCurrentProject],
   );
 
-  const handleRenameProject = useCallback(async (id: string, newTitle: string) => {
-    setProjects((prev) => prev.map((project) => (project.id === id ? { ...project, title: newTitle } : project)));
-    if (currentProject?.id === id) {
-      setCurrentProject({ ...currentProject, title: newTitle });
-    }
-    await renameProject(id, newTitle);
-    await loadProjects();
-  }, [currentProject, loadProjects]);
+  const handleRenameProject = useCallback(
+    async (id: string, newTitle: string) => {
+      await renameProject(id, newTitle);
+      await loadProjectsPage(projectPagination.page);
 
-  const handleProjectUpdate = useCallback(
-    async (updatedProject: Partial<ProjectRecord> & { id: string }) => {
-      setProjects((prev) =>
-        prev.map((project) =>
-          project.id === updatedProject.id
-            ? {
-                ...project,
-                title: updatedProject.title ?? project.title,
-                updatedAt: Date.now(),
-              }
-            : project,
-        ),
-      );
-
-      setCurrentProject((prev) => {
-        if (!prev || prev.id !== updatedProject.id) return prev;
-        return {
-          ...prev,
-          ...updatedProject,
-        };
-      });
-
-      await loadProjects();
+      if (currentProject?.id === id) {
+        await refreshCurrentProject(id);
+      }
     },
-    [loadProjects],
+    [currentProject?.id, loadProjectsPage, projectPagination.page, refreshCurrentProject],
   );
+
+  const handleProjectUpdate = useCallback((updatedProject: Partial<ProjectRecord> & { id: string }) => {
+    setProjects((prev) =>
+      prev.map((project) =>
+        project.id === updatedProject.id
+          ? {
+              ...project,
+              title: updatedProject.title ?? project.title,
+              updatedAt: updatedProject.updatedAt ?? Date.now(),
+            }
+          : project,
+      ),
+    );
+
+    setCurrentProject((prev) => {
+      if (!prev || prev.id !== updatedProject.id) return prev;
+      return {
+        ...prev,
+        ...updatedProject,
+      };
+    });
+  }, []);
 
   useEffect(() => {
-    if (loading || currentProject || isCreatingProject) return;
+    if (isLoadingProjects || currentProject || isCreatingProject) return;
 
     if (projects.length > 0) {
       void refreshCurrentProject(projects[0].id);
@@ -519,18 +634,23 @@ export default function ChatPage() {
     }
 
     void handleNewProject();
-  }, [currentProject, handleNewProject, isCreatingProject, loading, projects, refreshCurrentProject]);
+  }, [currentProject, handleNewProject, isCreatingProject, isLoadingProjects, projects, refreshCurrentProject]);
 
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar
-        chats={projects.map((project) => ({
+        projects={projects.map((project) => ({
           id: project.id,
           title: project.title,
           createdAt: project.createdAt,
         }))}
-        currentChatId={currentProject?.id ?? null}
+        currentProjectId={currentProject?.id ?? null}
+        currentPage={projectPagination.page}
+        totalPages={projectPagination.totalPages}
+        isLoadingProjects={isLoadingProjects}
+        isLoadingProjectDetail={isLoadingProjectDetail}
         onSelect={handleSelectProject}
+        onPageChange={handlePageChange}
         onNew={handleNewProject}
         onDelete={handleDeleteProject}
         onRename={handleRenameProject}

@@ -2,6 +2,7 @@ import {
   createBananaLectureApiClient,
   type AddDialogueRequest,
   type CreateProjectRequest,
+  type ListProjectsQuery,
   type SlideInputDTO,
   type UpdateDialogueRequest,
 } from '@/lib/banana-api';
@@ -15,6 +16,7 @@ import type {
 import type {
   Dialogue,
   DialogueEmotion,
+  ProjectListPage,
   DialogueRole,
   DialogueSpeed,
   ProjectRecord,
@@ -23,20 +25,16 @@ import type {
   SlideType,
   TaskProgress,
 } from '@/lib/project-types';
+import {
+  DEFAULT_PROJECT_LIST_PAGE,
+  DEFAULT_PROJECT_LIST_PAGE_SIZE,
+  safeParseProjectMessages,
+  stringifyProjectMessages,
+} from '@/lib/project-helpers';
 
 const DEFAULT_USER_ID = 'admin';
 
 const apiClient = createBananaLectureApiClient();
-
-function safeParseMessages(messages: string | null | undefined) {
-  if (!messages) return [];
-  try {
-    const parsed = JSON.parse(messages);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
 
 function toDialogueRole(role: string): DialogueRole {
   return role as DialogueRole;
@@ -90,7 +88,7 @@ function mapProjectRecord(dto: ProjectDetailDTO): ProjectRecord {
     title: dto.name,
     createdAt: dto.created_at,
     updatedAt: dto.updated_at,
-    messages: safeParseMessages(dto.messages),
+    messages: safeParseProjectMessages(dto.messages),
     videoPath: dto.video_path ?? undefined,
     pptPlan: dto.slides.length > 0 ? { slides: dto.slides.sort((a, b) => a.idx - b.idx).map((slide) => mapSlide(slide)) } : undefined,
   };
@@ -137,14 +135,23 @@ export function createDialogueUpdateInput(dialogue: Dialogue): UpdateDialogueReq
   };
 }
 
-export async function listProjects() {
+export async function listProjects(query: ListProjectsQuery = {}): Promise<ProjectListPage> {
   const response = await apiClient.listProjects(DEFAULT_USER_ID, {
-    page: 1,
-    page_size: 100,
+    page: query.page ?? DEFAULT_PROJECT_LIST_PAGE,
+    page_size: query.page_size ?? DEFAULT_PROJECT_LIST_PAGE_SIZE,
     sort_by: 'updated_at',
     order: 'desc',
+    ...query,
   });
-  return response.data.items.map(mapProjectSummary);
+  return {
+    items: response.data.items.map(mapProjectSummary),
+    pagination: {
+      page: response.data.pagination.page,
+      pageSize: response.data.pagination.page_size,
+      total: response.data.pagination.total,
+      totalPages: response.data.pagination.total_pages,
+    },
+  };
 }
 
 export async function createProject(payload: Pick<CreateProjectRequest, 'name'>) {
@@ -166,13 +173,13 @@ export async function renameProject(projectId: string, title: string) {
 }
 
 export async function updateProjectMessages(projectId: string, messages: any[]) {
-  await apiClient.updateProject(projectId, { messages: JSON.stringify(messages) });
+  await apiClient.updateProject(projectId, { messages: stringifyProjectMessages(messages) });
 }
 
 export async function updateProjectTitleAndMessages(projectId: string, title: string, messages: any[]) {
   await apiClient.updateProject(projectId, {
     name: title,
-    messages: JSON.stringify(messages),
+    messages: stringifyProjectMessages(messages),
   });
 }
 

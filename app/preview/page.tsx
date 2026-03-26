@@ -13,6 +13,7 @@ import { EmptyState } from './components/empty-state';
 function PreviewContent() {
   const searchParams = useSearchParams();
   const projectIdFromUrl = searchParams.get('id');
+  const pageFromUrl = searchParams.get('page');
   
   const {
     plan,
@@ -38,7 +39,7 @@ function PreviewContent() {
     handleOpenSlideAudio,
     handleOpenSlideImage,
     handleOpenVideo,
-  } = usePreviewState(projectIdFromUrl);
+  } = usePreviewState(projectIdFromUrl, pageFromUrl);
 
   if (isLoading) {
     return (
@@ -96,8 +97,7 @@ function PreviewContent() {
         <PreviewFooter 
           currentSlideIndex={currentSlideIndex}
           totalSlides={plan.slides.length}
-          onPrev={() => setCurrentSlideIndex(Math.max(0, currentSlideIndex - 1))}
-          onNext={() => setCurrentSlideIndex(Math.min(plan.slides.length - 1, currentSlideIndex + 1))}
+          onPageSelect={(page) => setCurrentSlideIndex(page - 1)}
         />
       )}
     </div>

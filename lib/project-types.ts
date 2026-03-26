@@ -61,6 +61,18 @@ export interface ProjectSummary {
   updatedAt: number;
 }
 
+export interface ProjectListPagination {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface ProjectListPage {
+  items: ProjectSummary[];
+  pagination: ProjectListPagination;
+}
+
 export interface ProjectRecord extends ProjectSummary {
   userId: string;
   messages: any[];

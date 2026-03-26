@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import type { Dialogue, PPTPlan, TaskProgress } from '@/lib/project-types';
 import {
   addDialogue,
@@ -20,6 +21,7 @@ import {
   reorderDialogues,
   updateDialogue,
 } from '@/lib/project-api';
+import { getPageParamFromSlideIndex, getSlideIndexFromPageParam } from '@/lib/project-helpers';
 import { normalizeDialogues } from '../utils';
 
 const POLL_INTERVAL_MS = 1500;
@@ -33,13 +35,26 @@ function dialoguesDiffer(left: Dialogue, right: Dialogue) {
   );
 }
 
-export function usePreviewState(projectIdFromUrl: string | null) {
+export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: string | null) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [plan, setPlan] = useState<PPTPlan | null>(null);
   const [projectId, setProjectId] = useState<string>(projectIdFromUrl || '');
-  const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
+  const [currentSlideIndex, setCurrentSlideIndexState] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingDialogues, setIsSavingDialogues] = useState(false);
   const [activeTask, setActiveTask] = useState<TaskProgress | null>(null);
+
+  const setCurrentSlideIndex = useCallback(
+    (nextIndex: number) => {
+      const nextPage = getPageParamFromSlideIndex(nextIndex);
+      const params = new URLSearchParams(searchParams.toString());
+      params.set('page', String(nextPage));
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    },
+    [pathname, router, searchParams],
+  );
 
   const refreshPlan = useCallback(async () => {
     if (!projectId) return;
@@ -57,6 +72,7 @@ export function usePreviewState(projectIdFromUrl: string | null) {
         setProjectId(projectIdFromUrl);
         const project = await getProject(projectIdFromUrl);
         setPlan(project.pptPlan ?? null);
+        setCurrentSlideIndexState(getSlideIndexFromPageParam(pageFromUrl, project.pptPlan?.slides.length ?? 0));
       } catch (error) {
         console.error('Failed to load preview plan:', error);
         setPlan(null);
@@ -66,7 +82,28 @@ export function usePreviewState(projectIdFromUrl: string | null) {
     };
 
     void loadPlan();
-  }, [projectIdFromUrl]);
+  }, [pageFromUrl, projectIdFromUrl]);
+
+  useEffect(() => {
+    if (!plan) return;
+    setCurrentSlideIndexState(getSlideIndexFromPageParam(pageFromUrl, plan.slides.length));
+  }, [pageFromUrl, plan]);
+
+  useEffect(() => {
+    if (!plan || plan.slides.length === 0) return;
+
+    const nextIndex = getSlideIndexFromPageParam(pageFromUrl, plan.slides.length);
+    const nextPage = getPageParamFromSlideIndex(nextIndex);
+    const currentPage = searchParams.get('page');
+
+    if (currentPage === String(nextPage)) {
+      return;
+    }
+
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('page', String(nextPage));
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }, [pageFromUrl, pathname, plan, router, searchParams]);
 
   useEffect(() => {
     if (!activeTask || !['pending', 'running'].includes(activeTask.status)) return;
