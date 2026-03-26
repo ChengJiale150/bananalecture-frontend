@@ -65,14 +65,12 @@ function ChatInterface({
 }) {
   const router = useRouter();
   const chatId = project.id;
-  const { status, sendMessage, messages, stop, setMessages, addToolApprovalResponse } = useChat<PlannerAgentUIMessage>({
+  const { status, sendMessage, messages, stop, setMessages } = useChat<PlannerAgentUIMessage>({
     id: chatId,
   });
 
-  const [autoApproveAfter, setAutoApproveAfter] = useState(false);
   const [pptPlan, setPptPlan] = useState(project.pptPlan);
   const processedToolCallIds = useRef<Set<string>>(new Set());
-  const processedApprovalIds = useRef<Set<string>>(new Set());
   const hasInitializedToolCallsRef = useRef(false);
   const projectTitleRef = useRef(project.title);
   const syncTimerRef = useRef<number | null>(null);
@@ -173,38 +171,6 @@ function ChatInterface({
     };
   }, [project, setMessages]);
 
-  const submitApproval = useCallback(
-    (approvalId: string, approved: boolean, reason?: string, enableAutoApprove?: boolean) => {
-      addToolApprovalResponse({ id: approvalId, approved, reason });
-      const nextAutoApprove = Boolean(enableAutoApprove) || autoApproveAfter;
-      if (enableAutoApprove) {
-        setAutoApproveAfter(true);
-      }
-      void sendMessage(undefined, { body: { id: chatId, autoApprove: nextAutoApprove } });
-    },
-    [addToolApprovalResponse, autoApproveAfter, chatId, sendMessage],
-  );
-
-  useEffect(() => {
-    if (!autoApproveAfter) return;
-
-    for (const message of messages) {
-      const parts = (message as any)?.parts;
-      if (!Array.isArray(parts)) continue;
-
-      for (const part of parts) {
-        if (!part || typeof part !== 'object') continue;
-        const approvalId = (part as any)?.approval?.id || (part as any)?.toolInvocation?.approval?.id;
-        const partState = (part as any)?.state || (part as any)?.toolInvocation?.state;
-        if (partState !== 'approval-requested' || !approvalId) continue;
-        if (processedApprovalIds.current.has(approvalId)) continue;
-
-        processedApprovalIds.current.add(approvalId);
-        submitApproval(approvalId, true);
-      }
-    }
-  }, [autoApproveAfter, messages, submitApproval]);
-
   useEffect(() => {
     latestMessagesRef.current = messages;
 
@@ -273,13 +239,12 @@ function ChatInterface({
     (text: string, options?: any) => {
       const body: any = {
         id: chatId,
-        autoApprove: autoApproveAfter,
         pptPlan,
         ...options,
       };
       sendMessage({ text }, { body });
     },
-    [chatId, autoApproveAfter, pptPlan, sendMessage],
+    [chatId, pptPlan, sendMessage],
   );
 
   const handleOpenPreview = useCallback(() => {

@@ -6,7 +6,6 @@ export async function POST(request: Request) {
   const payload = await request.json().catch(() => ({}));
   const messages = payload?.messages ?? [];
   const idFromBody = payload?.id;
-  const autoApproveFromBody = payload?.autoApprove;
   const pptPlan = payload?.pptPlan;
   const pageCount = payload?.pageCount;
   const audience = payload?.audience;
@@ -19,17 +18,12 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Missing chat id' }, { status: 400 });
   }
 
-  const autoApproveFromEnv =
-    String(process.env.AUTO_APPROVE ?? '').toLowerCase() === 'true';
-  const autoApprove = autoApproveFromEnv || autoApproveFromBody === true;
-
   return createAgentUIStreamResponse({
-    agent: createPlannerAgent(chatId, { 
-      autoApprove, 
-      pptPlan, 
-      pageCount, 
-      audience, 
-      style 
+    agent: createPlannerAgent(chatId, {
+      pptPlan,
+      pageCount,
+      audience,
+      style,
     }),
     uiMessages: messages,
   });

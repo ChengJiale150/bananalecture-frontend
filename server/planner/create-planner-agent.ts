@@ -27,14 +27,13 @@ export type PlannerAgentUIMessage = InferAgentUIMessage<typeof PlannerAgent>;
 
 export function createPlannerAgent(
   chatId: string,
-  options?: { autoApprove?: boolean; pptPlan?: PPTPlan; pageCount?: string; audience?: string; style?: string },
+  options?: PlannerOptions,
 ) {
   return new ToolLoopAgent({
     model: kimiClient(process.env.OPENAI_MODEL ?? 'kimi-k2.5'),
     instructions: buildSystemPrompt(options),
     tools: createPlannerTools(chatId),
     experimental_context: {
-      autoApprove: options?.autoApprove,
       pptPlan: options?.pptPlan,
     },
   });
