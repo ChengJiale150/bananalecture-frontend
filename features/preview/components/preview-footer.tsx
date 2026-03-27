@@ -16,12 +16,12 @@ export function PreviewFooter({
   const visiblePages = getVisiblePaginationPages(currentPage, totalSlides, 2);
 
   return (
-    <footer className="bg-white border-t-4 border-gray-900 p-4 flex-none z-10">
-      <div className="flex flex-wrap items-center justify-center gap-3">
+    <footer className="flex-none border-t-4 border-gray-900 bg-white px-4 py-2.5 z-10">
+      <div className="flex flex-wrap items-center justify-center gap-2.5">
         <button
           onClick={() => onPageSelect(currentPage - 1)}
           disabled={currentPage === 1}
-          className={`flex items-center gap-2 px-4 py-2 font-bold rounded-xl border-2 transition-all ${
+          className={`flex items-center gap-2 rounded-xl border-2 px-3 py-2 text-sm font-bold transition-all ${
             currentPage === 1
               ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
               : 'bg-white text-gray-700 border-gray-900 hover:bg-gray-50 shadow-[2px_2px_0px_rgba(0,0,0,1)]'
@@ -31,12 +31,12 @@ export function PreviewFooter({
           上一页
         </button>
 
-        <div className="flex items-center gap-2 rounded-2xl border-2 border-gray-900 bg-[#F0F8FF] px-3 py-2 shadow-[2px_2px_0px_rgba(0,0,0,1)]">
+        <div className="flex items-center gap-1.5 rounded-2xl border-2 border-gray-900 bg-[#F0F8FF] px-2 py-1.5 shadow-[2px_2px_0px_rgba(0,0,0,1)]">
           {visiblePages.map((page) => (
             <button
               key={page}
               onClick={() => onPageSelect(page)}
-              className={`min-w-10 rounded-xl border-2 px-3 py-2 text-sm font-black transition-all ${
+              className={`min-w-9 rounded-xl border-2 px-2.5 py-1.5 text-sm font-black transition-all ${
                 page === currentPage
                   ? 'border-gray-900 bg-[var(--doraemon-blue)] text-white'
                   : 'border-transparent bg-white text-gray-700 hover:border-gray-900'
@@ -47,14 +47,14 @@ export function PreviewFooter({
           ))}
         </div>
 
-        <span className="font-black text-gray-900 text-lg">
+        <span className="text-sm font-black text-gray-900 lg:text-base">
           第 {currentPage} / {totalSlides} 页
         </span>
 
         <button
           onClick={() => onPageSelect(currentPage + 1)}
           disabled={currentPage === totalSlides}
-          className={`flex items-center gap-2 px-4 py-2 font-bold rounded-xl border-2 transition-all ${
+          className={`flex items-center gap-2 rounded-xl border-2 px-3 py-2 text-sm font-bold transition-all ${
             currentPage === totalSlides
               ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
               : 'bg-white text-[var(--doraemon-blue)] border-gray-900 hover:bg-blue-50 shadow-[2px_2px_0px_rgba(0,0,0,1)]'

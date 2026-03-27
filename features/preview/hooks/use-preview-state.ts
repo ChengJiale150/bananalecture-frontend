@@ -47,10 +47,16 @@ import {
   persistGenerationSession,
 } from '@/features/preview/utils/generation-session';
 import {
+  clearProjectPreviewCache,
   normalizeDialogues,
+  readCachedDialogues,
+  readCachedProject,
   removeDialogueById,
   reorderDialoguesLocally,
   upsertDialogue,
+  updateCachedProject,
+  writeCachedDialogues,
+  writeCachedProject,
 } from '../utils';
 
 const POLL_INTERVAL_MS = 1500;
@@ -74,7 +80,11 @@ function createErroredSession(
   };
 }
 
-export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: string | null) {
+export function usePreviewState(
+  projectIdFromUrl: string | null,
+  pageFromUrl: string | null,
+  refreshToken: string | null,
+) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -83,6 +93,7 @@ export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: st
   const [projectVideoPath, setProjectVideoPath] = useState<string | undefined>();
   const [currentSlideIndex, setCurrentSlideIndexState] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [activeActionKey, setActiveActionKey] = useState<string | null>(null);
   const [generationSession, setGenerationSession] = useState<GenerationSessionState | null>(null);
   const generationSessionRef = useRef<GenerationSessionState | null>(null);
@@ -120,22 +131,86 @@ export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: st
     [projectId],
   );
 
-  const refreshProject = useCallback(async () => {
-    if (!projectId) return null;
-    const project = await getProject(projectId);
+  const applyProjectToState = useCallback((project: Awaited<ReturnType<typeof getProject>>) => {
     setPlan(project.pptPlan ?? null);
     setProjectVideoPath(project.videoPath ?? undefined);
+    writeCachedProject(project);
     return project;
-  }, [projectId]);
+  }, []);
+
+  const refreshProject = useCallback(
+    async (options?: { force?: boolean; includeCurrentSlideDialogues?: boolean }) => {
+      if (!projectId) return null;
+
+      const force = options?.force ?? false;
+      const includeCurrentSlideDialogues = options?.includeCurrentSlideDialogues ?? false;
+
+      if (force) {
+        clearProjectPreviewCache(projectId);
+      }
+
+      const cachedProject = !force ? readCachedProject(projectId) : null;
+      const project = cachedProject ?? await getProject(projectId);
+      applyProjectToState(project);
+
+      if (!includeCurrentSlideDialogues) {
+        return project;
+      }
+
+      const activeSlide = project.pptPlan?.slides[currentSlideIndex];
+      if (!activeSlide?.id) {
+        return project;
+      }
+
+      const dialogues = await listDialogues(projectId, activeSlide.id);
+      writeCachedDialogues(projectId, activeSlide.id, dialogues);
+      setPlan((prev) => {
+        if (!prev) {
+          return prev;
+        }
+
+        return {
+          slides: prev.slides.map((slide) => (slide.id === activeSlide.id ? { ...slide, dialogues } : slide)),
+        };
+      });
+      updateCachedProject(projectId, (currentProject) => ({
+        ...currentProject,
+        pptPlan: currentProject.pptPlan
+          ? {
+              slides: currentProject.pptPlan.slides.map((slide) =>
+                slide.id === activeSlide.id ? { ...slide, dialogues } : slide,
+              ),
+            }
+          : currentProject.pptPlan,
+      }));
+
+      return project;
+    },
+    [applyProjectToState, currentSlideIndex, projectId],
+  );
 
   const replaceSlideDialoguesInState = useCallback((slideId: string, dialogues: Dialogue[]) => {
+    if (projectId) {
+      writeCachedDialogues(projectId, slideId, dialogues);
+      updateCachedProject(projectId, (project) => ({
+        ...project,
+        pptPlan: project.pptPlan
+          ? {
+              slides: project.pptPlan.slides.map((slide) =>
+                slide.id === slideId ? { ...slide, dialogues } : slide,
+              ),
+            }
+          : project.pptPlan,
+      }));
+    }
+
     setPlan((prev) => {
       if (!prev) return prev;
       return {
         slides: prev.slides.map((slide) => (slide.id === slideId ? { ...slide, dialogues } : slide)),
       };
     });
-  }, []);
+  }, [projectId]);
 
   const runAction = useCallback(async <T,>(key: string, task: () => Promise<T>) => {
     setActiveActionKey(key);
@@ -203,9 +278,14 @@ export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: st
         }
 
         setProjectId(projectIdFromUrl);
-        const project = await getProject(projectIdFromUrl);
-        setPlan(project.pptPlan ?? null);
-        setProjectVideoPath(project.videoPath ?? undefined);
+        const shouldForceRefresh = Boolean(refreshToken);
+        if (shouldForceRefresh) {
+          clearProjectPreviewCache(projectIdFromUrl);
+        }
+
+        const cachedProject = !shouldForceRefresh ? readCachedProject(projectIdFromUrl) : null;
+        const project = cachedProject ?? await getProject(projectIdFromUrl);
+        applyProjectToState(project);
         setCurrentSlideIndexState(getSlideIndexFromPageParam(pageFromUrl, project.pptPlan?.slides.length ?? 0));
         commitGenerationSession(loadGenerationSession(projectIdFromUrl));
       } catch (error) {
@@ -218,7 +298,7 @@ export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: st
     };
 
     void loadPlan();
-  }, [commitGenerationSession, pageFromUrl, projectIdFromUrl]);
+  }, [applyProjectToState, commitGenerationSession, pageFromUrl, projectIdFromUrl, refreshToken]);
 
   useEffect(() => {
     if (!plan) return;
@@ -374,6 +454,12 @@ export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: st
     let cancelled = false;
     const loadDialogues = async () => {
       try {
+        const cachedDialogues = readCachedDialogues(projectId, currentSlide.id);
+        if (cachedDialogues) {
+          replaceSlideDialoguesInState(currentSlide.id, cachedDialogues);
+          return;
+        }
+
         const dialogues = await listDialogues(projectId, currentSlide.id);
         if (cancelled) return;
         replaceSlideDialoguesInState(currentSlide.id, dialogues);
@@ -519,7 +605,7 @@ export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: st
     const actionKey = `generate-image:${currentSlide.id}`;
     await runAction(actionKey, async () => {
       await generateSlideImage(projectId, currentSlide.id);
-      await refreshProject();
+      await refreshProject({ force: true });
       return true;
     });
   }, [currentSlide?.id, projectId, refreshProject, runAction]);
@@ -529,7 +615,7 @@ export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: st
     const actionKey = `modify-image:${currentSlide.id}`;
     const result = await runAction(actionKey, async () => {
       await modifySlideImage(projectId, currentSlide.id, prompt);
-      await refreshProject();
+      await refreshProject({ force: true });
       return true;
     });
     return Boolean(result);
@@ -540,7 +626,7 @@ export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: st
     const actionKey = `generate-audio:${currentSlide.id}`;
     await runAction(actionKey, async () => {
       await generateSlideAudio(projectId, currentSlide.id);
-      await refreshProject();
+      await refreshProject({ force: true });
       return true;
     });
   }, [currentSlide?.id, projectId, refreshProject, runAction]);
@@ -580,6 +666,24 @@ export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: st
     }
   }, [projectId]);
 
+  const handleForceRefresh = useCallback(async () => {
+    if (!projectId || isRefreshing) {
+      return;
+    }
+
+    setIsRefreshing(true);
+    setIsLoading(true);
+
+    try {
+      await refreshProject({ force: true, includeCurrentSlideDialogues: true });
+    } catch (error) {
+      console.error('Failed to force refresh preview:', error);
+    } finally {
+      setIsRefreshing(false);
+      setIsLoading(false);
+    }
+  }, [isRefreshing, projectId, refreshProject]);
+
   const overallGenerationProgress = useMemo(
     () => getGenerationOverallProgress(generationSession),
     [generationSession],
@@ -591,6 +695,7 @@ export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: st
     currentSlideIndex,
     setCurrentSlideIndex,
     isLoading,
+    isRefreshing,
     isGeneratingAll: isGenerationSessionActive(generationSession),
     isDialogueActionPending: activeActionKey?.startsWith('dialogue-') ?? false,
     generationSession,
@@ -607,7 +712,7 @@ export function usePreviewState(projectIdFromUrl: string | null, pageFromUrl: st
     handleGenerateAll,
     handleStartStageGeneration,
     handleStopGeneration,
-    handleForceRefresh: refreshProject,
+    handleForceRefresh,
     handleAddDialogue,
     handleUpdateDialogue,
     handleDeleteDialogue,

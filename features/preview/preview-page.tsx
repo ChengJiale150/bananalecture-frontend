@@ -14,12 +14,14 @@ function PreviewContent() {
   const searchParams = useSearchParams();
   const projectIdFromUrl = searchParams.get('id');
   const pageFromUrl = searchParams.get('page');
+  const refreshTokenFromUrl = searchParams.get('refresh');
   
   const {
     plan,
     currentSlideIndex,
     setCurrentSlideIndex,
     isLoading,
+    isRefreshing,
     isGeneratingAll,
     isDialogueActionPending,
     generationSession,
@@ -48,17 +50,17 @@ function PreviewContent() {
     handleOpenDialogueAudio,
     handleDownloadVideo,
     projectVideoPath,
-  } = usePreviewState(projectIdFromUrl, pageFromUrl);
+  } = usePreviewState(projectIdFromUrl, pageFromUrl, refreshTokenFromUrl);
 
   if (isLoading) {
     return (
       <div className="h-screen bg-[#F0F8FF] flex flex-col overflow-hidden">
         <header className="bg-white border-b-4 border-gray-900 shadow-sm h-[72px] animate-pulse" />
-        <div className="flex-1 flex overflow-hidden">
-          <div className="flex-1 p-6 flex flex-col gap-6 overflow-y-auto border-r-2 border-gray-200">
-            <div className="flex-1 bg-white border-4 border-gray-900 rounded-3xl p-8 shadow-[8px_8px_0px_rgba(0,0,0,1)] animate-pulse" />
+        <div className="flex-1 min-h-0 p-4 pb-3">
+          <div className="h-full grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_420px]">
+            <div className="rounded-[28px] border-4 border-gray-900 bg-white shadow-[8px_8px_0px_rgba(0,0,0,1)] animate-pulse" />
+            <div className="rounded-[28px] border-4 border-gray-900 bg-white shadow-[8px_8px_0px_rgba(0,0,0,1)] animate-pulse" />
           </div>
-          <div className="w-[450px] bg-white flex flex-col border-l-2 border-gray-200 animate-pulse" />
         </div>
       </div>
     );
@@ -68,6 +70,7 @@ function PreviewContent() {
     <div className="h-screen bg-[#F0F8FF] flex flex-col overflow-hidden">
         <PreviewHeader 
           isGeneratingAll={isGeneratingAll}
+          isRefreshing={isRefreshing}
           generationSession={generationSession}
           overallGenerationProgress={overallGenerationProgress}
           hasVideo={Boolean(projectVideoPath)}
@@ -79,7 +82,8 @@ function PreviewContent() {
         />
 
       {plan && plan.slides.length > 0 && currentSlide ? (
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 min-h-0 p-4 pb-3">
+          <div className="grid h-full min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_420px]">
           <SlideViewer 
             currentSlide={currentSlide}
             isGeneratingAll={isGeneratingAll}
@@ -104,6 +108,7 @@ function PreviewContent() {
             onMove={handleMoveDialogue}
             onPlayAudio={handleOpenDialogueAudio}
           />
+          </div>
         </div>
       ) : (
         <EmptyState />

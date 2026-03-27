@@ -1,5 +1,7 @@
 import type { Dialogue } from '@/features/projects/types';
 
+export * from './preview-cache';
+
 export function createClientId() {
   return typeof crypto !== 'undefined' && crypto.randomUUID
     ? crypto.randomUUID()

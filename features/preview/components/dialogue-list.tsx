@@ -73,24 +73,25 @@ export function DialogueList({
   };
 
   return (
-    <div className="w-[450px] bg-white flex flex-col border-l-2 border-gray-200">
-      <div className="p-4 border-b border-gray-100 bg-gray-50">
+    <aside className="min-h-0 rounded-[28px] border-4 border-gray-900 bg-white shadow-[8px_8px_0px_rgba(0,0,0,1)]">
+      <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="border-b-2 border-gray-900 bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] p-4">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h3 className="font-black text-gray-900">口播稿对话</h3>
-            <p className="text-sm text-gray-500">每个动作会实时同步到后端。</p>
+            <h3 className="text-lg font-black text-gray-900">口播稿对话</h3>
+            <p className="text-sm text-gray-500">列表固定高度，内容过多时在内部滚动。</p>
           </div>
           <button
             onClick={() => void handleAdd()}
             disabled={isBusy}
-            className="flex items-center gap-2 rounded-xl border-2 border-[var(--doraemon-blue)] px-3 py-2 font-bold text-[var(--doraemon-blue)] hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400"
+            className="flex items-center gap-2 rounded-2xl border-2 border-[var(--doraemon-blue)] px-3 py-2 text-sm font-bold text-[var(--doraemon-blue)] hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400"
           >
             <Plus size={16} />
             添加对话
           </button>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-[#F8FBFF] p-4">
         {dialogues.map((dialogue, index) => {
           const isEditing = editingDialogueId === dialogue.id;
           const activeDialogue = isEditing && draftDialogue ? draftDialogue : dialogue;
@@ -98,8 +99,8 @@ export function DialogueList({
           const speed = getSpeedDisplay(activeDialogue.speed);
 
           return (
-            <div key={dialogue.id} className="bg-white border-2 border-gray-200 rounded-2xl p-4 hover:border-gray-300 transition-colors shadow-sm">
-              <div className="mb-3 flex items-center justify-between">
+            <div key={dialogue.id} className="rounded-2xl border-2 border-gray-200 bg-white p-4 shadow-sm transition-colors hover:border-gray-300">
+              <div className="mb-3 flex items-start justify-between gap-3">
                 <div className="flex items-center gap-2 flex-wrap">
                   {isEditing ? (
                     <>
@@ -169,7 +170,7 @@ export function DialogueList({
                     <Play size={14} />
                   </button>
                 </div>
-                <div className="flex items-center gap-1 text-gray-400">
+                <div className="flex items-center gap-1 self-start text-gray-400">
                   <button
                     onClick={() => void onMove(dialogue.id, -1)}
                     className="p-1 hover:text-gray-700 rounded hover:bg-gray-100"
@@ -233,11 +234,11 @@ export function DialogueList({
                     setDraftDialogue((prev) => (prev ? { ...prev, content: event.target.value } : prev))
                   }
                   rows={4}
-                  className="w-full text-gray-800 text-sm leading-relaxed border border-gray-300 rounded-lg p-2 resize-none"
+                  className="w-full resize-none rounded-lg border border-gray-300 p-2 text-sm leading-relaxed text-gray-800"
                   placeholder="请输入对话内容"
                 />
               ) : (
-                <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm leading-relaxed text-gray-800">
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm leading-6 text-gray-800">
                   {dialogue.content || '当前对话暂无内容'}
                 </div>
               )}
@@ -246,11 +247,12 @@ export function DialogueList({
         })}
 
         {dialogues.length === 0 && (
-          <div className="rounded-2xl border-2 border-dashed border-gray-300 p-6 text-center text-gray-500">
+          <div className="rounded-2xl border-2 border-dashed border-gray-300 bg-white p-6 text-center text-gray-500">
             当前页暂无口播稿，请点击“生成口播稿”或“添加对话”开始编辑。
           </div>
         )}
       </div>
-    </div>
+      </div>
+    </aside>
   );
 }

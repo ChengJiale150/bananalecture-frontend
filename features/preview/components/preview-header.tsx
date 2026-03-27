@@ -4,6 +4,7 @@ import {
   Download,
   FileText,
   Image as ImageIcon,
+  Loader2,
   RefreshCw,
   Settings,
   Sparkles,
@@ -17,6 +18,7 @@ import type { GenerationSessionState, GenerationStage } from '@/features/project
 
 interface PreviewHeaderProps {
   isGeneratingAll: boolean;
+  isRefreshing: boolean;
   generationSession: GenerationSessionState | null;
   overallGenerationProgress: number;
   hasVideo: boolean;
@@ -24,7 +26,7 @@ interface PreviewHeaderProps {
   handleGenerateAll: () => void;
   handleStartStageGeneration: (stage: GenerationStage) => void;
   handleDownloadVideo: () => void;
-  handleForceRefresh: () => void;
+  handleForceRefresh: () => Promise<void>;
 }
 
 const ADVANCED_ACTIONS: Array<{ stage: GenerationStage; label: string; icon: typeof ImageIcon }> = [
@@ -36,6 +38,7 @@ const ADVANCED_ACTIONS: Array<{ stage: GenerationStage; label: string; icon: typ
 
 export function PreviewHeader({
   isGeneratingAll,
+  isRefreshing,
   generationSession,
   overallGenerationProgress,
   hasVideo,
@@ -129,11 +132,16 @@ export function PreviewHeader({
             )}
           </div>
           <button
-            onClick={handleForceRefresh}
-            className="flex items-center gap-2 px-4 py-2 bg-white text-green-500 font-bold rounded-full border-2 border-green-500 hover:bg-green-50 transition-all"
+            onClick={() => void handleForceRefresh()}
+            disabled={isRefreshing}
+            className={`flex items-center gap-2 px-4 py-2 font-bold rounded-full border-2 transition-all ${
+              isRefreshing
+                ? 'bg-green-100 text-green-400 border-green-200 cursor-wait'
+                : 'bg-white text-green-500 border-green-500 hover:bg-green-50'
+            }`}
           >
-            <RefreshCw size={18} />
-            刷新
+            {isRefreshing ? <Loader2 size={18} className="animate-spin" /> : <RefreshCw size={18} />}
+            {isRefreshing ? '重新加载中' : '刷新'}
           </button>
         </div>
       </div>
