@@ -29,6 +29,7 @@ function PreviewContent() {
     currentSlide,
     displayDialogues,
     currentSlideImageUrl,
+    currentSlideAudioUrl,
     isGeneratingImage,
     isModifyingImage,
     isGeneratingDialogues,
@@ -45,9 +46,6 @@ function PreviewContent() {
     handleGenerateImage,
     handleModifyImage,
     handleGenerateAudio,
-    handleOpenSlideAudio,
-    handleOpenSlideImage,
-    handleOpenDialogueAudio,
     handleDownloadVideo,
     projectVideoPath,
   } = usePreviewState(projectIdFromUrl, pageFromUrl, refreshTokenFromUrl);
@@ -95,9 +93,8 @@ function PreviewContent() {
             handleGenerateImage={handleGenerateImage}
             handleModifyImage={handleModifyImage}
             handleGenerateAudio={handleGenerateAudio}
-            handleOpenSlideAudio={handleOpenSlideAudio}
-            handleOpenSlideImage={handleOpenSlideImage}
             slideImageUrl={currentSlideImageUrl}
+            slideAudioUrl={currentSlideAudioUrl}
           />
           <DialogueList
             dialogues={displayDialogues}
@@ -106,7 +103,6 @@ function PreviewContent() {
             onUpdate={handleUpdateDialogue}
             onDelete={handleDeleteDialogue}
             onMove={handleMoveDialogue}
-            onPlayAudio={handleOpenDialogueAudio}
           />
           </div>
         </div>

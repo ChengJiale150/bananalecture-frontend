@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { DIALOGUE_EMOTIONS, DIALOGUE_ROLES, DIALOGUE_SPEEDS, type Dialogue } from '@/features/projects/types';
-import { Play, Trash2, ChevronUp, ChevronDown, Plus, X, Edit2, Check } from 'lucide-react';
+import { Trash2, ChevronUp, ChevronDown, Plus, X, Edit2, Check } from 'lucide-react';
 import { getEmotionDisplay, getSpeedDisplay } from '../utils';
 
 interface DialogueListProps {
@@ -10,7 +10,6 @@ interface DialogueListProps {
   onUpdate: (dialogue: Dialogue) => Promise<boolean>;
   onDelete: (dialogueId: string) => Promise<boolean>;
   onMove: (dialogueId: string, direction: -1 | 1) => Promise<boolean>;
-  onPlayAudio: (dialogueId: string) => void;
 }
 
 export function DialogueList({
@@ -20,7 +19,6 @@ export function DialogueList({
   onUpdate,
   onDelete,
   onMove,
-  onPlayAudio,
 }: DialogueListProps) {
   const [editingDialogueId, setEditingDialogueId] = useState<string | null>(null);
   const [draftDialogue, setDraftDialogue] = useState<Dialogue | null>(null);
@@ -74,12 +72,11 @@ export function DialogueList({
 
   return (
     <aside className="min-h-0 rounded-[28px] border-4 border-gray-900 bg-white shadow-[8px_8px_0px_rgba(0,0,0,1)]">
-      <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[24px]">
       <div className="border-b-2 border-gray-900 bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] p-4">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h3 className="text-lg font-black text-gray-900">口播稿对话</h3>
-            <p className="text-sm text-gray-500">列表固定高度，内容过多时在内部滚动。</p>
+            <h3 className="text-lg font-black text-gray-900">对话展示框</h3>
           </div>
           <button
             onClick={() => void handleAdd()}
@@ -157,18 +154,6 @@ export function DialogueList({
                       </span>
                     </>
                   )}
-                  <button
-                    onClick={() => onPlayAudio(dialogue.id)}
-                    disabled={!dialogue.audioPath}
-                    className={`p-1 rounded-full transition-colors ${
-                      dialogue.audioPath
-                        ? 'text-[var(--doraemon-blue)] hover:bg-blue-50'
-                        : 'text-gray-300 cursor-not-allowed'
-                    }`}
-                    title="播放音频"
-                  >
-                    <Play size={14} />
-                  </button>
                 </div>
                 <div className="flex items-center gap-1 self-start text-gray-400">
                   <button
@@ -248,7 +233,7 @@ export function DialogueList({
 
         {dialogues.length === 0 && (
           <div className="rounded-2xl border-2 border-dashed border-gray-300 bg-white p-6 text-center text-gray-500">
-            当前页暂无口播稿，请点击“生成口播稿”或“添加对话”开始编辑。
+            当前页暂无对话，请点击“生成对话”或“添加对话”开始编辑。
           </div>
         )}
       </div>

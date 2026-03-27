@@ -59,7 +59,7 @@ import {
   writeCachedProject,
 } from '../utils';
 
-const POLL_INTERVAL_MS = 1500;
+const POLL_INTERVAL_MS = 2000;
 
 function createErroredSession(
   projectId: string,
@@ -147,6 +147,8 @@ export function usePreviewState(
 
       if (force) {
         clearProjectPreviewCache(projectId);
+        setSlideImageTimestamp(Date.now());
+        setSlideAudioTimestamp(Date.now());
       }
 
       const cachedProject = !force ? readCachedProject(projectId) : null;
@@ -343,14 +345,13 @@ export function usePreviewState(
     }
   }, [projectId, startStageTask]);
 
-  useEffect(() => {
-    const activeSession = generationSession;
-    if (!activeSession || activeSession.status !== 'running') {
-      return;
-    }
+  const activeSessionStatus = generationSession?.status;
+  const activeTaskId = activeSessionStatus === 'running' && generationSession
+    ? (generationSession.activeTask?.id ?? getCurrentGenerationStageState(generationSession)?.taskId)
+    : undefined;
 
-    const taskId = activeSession.activeTask?.id ?? getCurrentGenerationStageState(activeSession)?.taskId;
-    if (!taskId) {
+  useEffect(() => {
+    if (activeSessionStatus !== 'running' || !activeTaskId) {
       return;
     }
 
@@ -359,7 +360,7 @@ export function usePreviewState(
 
     const pollTask = async () => {
       try {
-        const nextTask = await getTask(taskId);
+        const nextTask = await getTask(activeTaskId);
         if (cancelled) return;
 
         const currentSession = generationSessionRef.current;
@@ -403,7 +404,7 @@ export function usePreviewState(
           ...currentSession,
           activeTask: nextTask,
         },
-        currentSession.currentStage ?? activeSession.currentStage ?? 'images',
+        currentSession.currentStage ?? 'images',
         nextTask,
       );
       commitGenerationSession(nextSession);
@@ -444,9 +445,11 @@ export function usePreviewState(
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [commitGenerationSession, generationSession, refreshProject, startStageTask]);
+  }, [activeSessionStatus, activeTaskId, commitGenerationSession, refreshProject, startStageTask]);
 
   const currentSlide = plan?.slides[currentSlideIndex];
+  const [slideImageTimestamp, setSlideImageTimestamp] = useState(Date.now());
+  const [slideAudioTimestamp, setSlideAudioTimestamp] = useState(Date.now());
 
   useEffect(() => {
     if (!currentSlide?.id || Array.isArray(currentSlide.dialogues)) return;
@@ -476,8 +479,12 @@ export function usePreviewState(
 
   const displayDialogues = useMemo(() => currentSlide?.dialogues ?? [], [currentSlide]);
   const slideImageUrl = useMemo(
-    () => (projectId && currentSlide?.id && currentSlide.imagePath ? getSlideImageUrl(projectId, currentSlide.id) : null),
-    [currentSlide?.id, currentSlide?.imagePath, projectId],
+    () => (projectId && currentSlide?.id && currentSlide.imagePath ? `${getSlideImageUrl(projectId, currentSlide.id)}?t=${slideImageTimestamp}` : null),
+    [currentSlide?.id, currentSlide?.imagePath, projectId, slideImageTimestamp],
+  );
+  const slideAudioUrl = useMemo(
+    () => (projectId && currentSlide?.id && currentSlide.audioPath ? `${getSlideAudioUrl(projectId, currentSlide.id)}?t=${slideAudioTimestamp}` : null),
+    [currentSlide?.audioPath, currentSlide?.id, projectId, slideAudioTimestamp],
   );
 
   const handleGenerateDialogues = useCallback(async () => {
@@ -631,23 +638,6 @@ export function usePreviewState(
     });
   }, [currentSlide?.id, projectId, refreshProject, runAction]);
 
-  const handleOpenSlideAudio = useCallback(() => {
-    if (!projectId || !currentSlide?.id || !currentSlide.audioPath) return;
-    window.open(getSlideAudioUrl(projectId, currentSlide.id), '_blank', 'noopener,noreferrer');
-  }, [currentSlide?.audioPath, currentSlide?.id, projectId]);
-
-  const handleOpenSlideImage = useCallback(() => {
-    if (!projectId || !currentSlide?.id || !currentSlide.imagePath) return;
-    window.open(getSlideImageUrl(projectId, currentSlide.id), '_blank', 'noopener,noreferrer');
-  }, [currentSlide?.id, currentSlide?.imagePath, projectId]);
-
-  const handleOpenDialogueAudio = useCallback((dialogueId: string) => {
-    if (!projectId || !currentSlide?.id) return;
-    const dialogue = displayDialogues.find((item) => item.id === dialogueId);
-    if (!dialogue?.audioPath) return;
-    window.open(getDialogueAudioUrl(projectId, currentSlide.id, dialogueId), '_blank', 'noopener,noreferrer');
-  }, [currentSlide?.id, displayDialogues, projectId]);
-
   const handleDownloadVideo = useCallback(async () => {
     if (!projectId) return;
 
@@ -703,6 +693,7 @@ export function usePreviewState(
     currentSlide,
     displayDialogues,
     currentSlideImageUrl: slideImageUrl,
+    currentSlideAudioUrl: slideAudioUrl,
     projectVideoPath,
     isGeneratingImage: activeActionKey === `generate-image:${currentSlide?.id ?? ''}`,
     isModifyingImage: activeActionKey === `modify-image:${currentSlide?.id ?? ''}`,
@@ -720,9 +711,6 @@ export function usePreviewState(
     handleGenerateImage,
     handleModifyImage,
     handleGenerateAudio,
-    handleOpenSlideAudio,
-    handleOpenSlideImage,
-    handleOpenDialogueAudio,
     handleDownloadVideo,
   };
 }

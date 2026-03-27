@@ -47,10 +47,6 @@ export function PreviewFooter({
           ))}
         </div>
 
-        <span className="text-sm font-black text-gray-900 lg:text-base">
-          第 {currentPage} / {totalSlides} 页
-        </span>
-
         <button
           onClick={() => onPageSelect(currentPage + 1)}
           disabled={currentPage === totalSlides}

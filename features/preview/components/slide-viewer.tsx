@@ -1,12 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import type { Slide } from '@/features/projects/types';
-import { FileText, Image as ImageIcon, Edit2, Volume2, Play, X } from 'lucide-react';
+import { FileText, Image as ImageIcon, Edit2, Volume2, Play, Square, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 interface SlideViewerProps {
   currentSlide: Slide;
   slideImageUrl: string | null;
+  slideAudioUrl: string | null;
   isGeneratingAll: boolean;
   isGeneratingImage: boolean;
   isModifyingImage: boolean;
@@ -16,13 +17,12 @@ interface SlideViewerProps {
   handleGenerateImage: () => void;
   handleModifyImage: (prompt: string) => Promise<boolean>;
   handleGenerateAudio: () => void;
-  handleOpenSlideAudio: () => void;
-  handleOpenSlideImage: () => void;
 }
 
 export function SlideViewer({
   currentSlide,
   slideImageUrl,
+  slideAudioUrl,
   isGeneratingAll,
   isGeneratingImage,
   isModifyingImage,
@@ -32,11 +32,11 @@ export function SlideViewer({
   handleGenerateImage,
   handleModifyImage,
   handleGenerateAudio,
-  handleOpenSlideAudio,
-  handleOpenSlideImage,
 }: SlideViewerProps) {
   const [showModifyDialog, setShowModifyDialog] = useState(false);
   const [modifyPrompt, setModifyPrompt] = useState('');
+  const [isPlaying, setIsPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     if (!showModifyDialog) {
@@ -61,35 +61,34 @@ export function SlideViewer({
     }
   };
 
+  const handleImageClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    const imgElement = e.currentTarget.querySelector('img');
+    if (imgElement && imgElement.requestFullscreen) {
+      void imgElement.requestFullscreen();
+    }
+  };
+
+  const togglePlayAudio = () => {
+    if (!audioRef.current) return;
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      void audioRef.current.play();
+      setIsPlaying(true);
+    }
+  };
+
   return (
     <section className="min-h-0 rounded-[28px] border-4 border-gray-900 bg-white p-4 shadow-[8px_8px_0px_rgba(0,0,0,1)] lg:p-5">
       <div className="flex h-full min-h-0 flex-col gap-4">
-        <div className="rounded-[24px] border-2 border-gray-900 bg-[linear-gradient(135deg,#ffffff_0%,#eef8ff_100%)] px-5 py-4 shadow-[4px_4px_0px_rgba(0,0,0,1)]">
-          <div className="mb-3 flex items-start justify-between gap-3">
-            <span className="inline-flex rounded-full border-2 border-gray-900 bg-[#FFF4D6] px-3 py-1 text-xs font-black uppercase tracking-[0.18em] text-gray-900">
-              {currentSlide.type}
-            </span>
-            <span className="rounded-full border border-gray-300 bg-white px-3 py-1 text-xs font-semibold text-gray-500">
-              幻灯片预览
-            </span>
-          </div>
-          <div className="mx-auto max-w-4xl text-center">
-            <h2 className="text-2xl font-black leading-tight text-gray-900 lg:text-[2rem]">
-              {currentSlide.title}
-            </h2>
-            <p className="mt-2 text-sm leading-6 text-gray-600 lg:text-base">
-              {currentSlide.description}
-            </p>
-          </div>
-        </div>
-
         <div className="flex-1 min-h-0 rounded-[24px] border-2 border-gray-900 bg-[#F6FBFF] p-4 shadow-[4px_4px_0px_rgba(0,0,0,1)]">
           <div className="flex h-full min-h-0 items-center justify-center">
             {currentSlide.imagePath && slideImageUrl ? (
               <button
-                onClick={handleOpenSlideImage}
-                className="aspect-video h-auto w-full max-w-[980px] overflow-hidden rounded-[24px] border-2 border-gray-900 bg-[radial-gradient(circle_at_top,#ffffff,#dbeafe)] shadow-[4px_4px_0px_rgba(0,0,0,1)] transition-transform hover:translate-x-[-1px] hover:translate-y-[-1px]"
-                title="查看原图"
+                onClick={handleImageClick}
+                className="aspect-video h-full max-w-full overflow-hidden rounded-[24px] border-2 border-gray-900 bg-[radial-gradient(circle_at_top,#ffffff,#dbeafe)] shadow-[4px_4px_0px_rgba(0,0,0,1)] transition-transform hover:translate-x-[-1px] hover:translate-y-[-1px]"
+                title="全屏查看原图"
               >
                 <img
                   src={slideImageUrl}
@@ -98,11 +97,11 @@ export function SlideViewer({
                 />
               </button>
             ) : (
-              <div className="aspect-video w-full max-w-[980px] overflow-hidden rounded-[24px] border-2 border-dashed border-gray-400 bg-white shadow-[4px_4px_0px_rgba(0,0,0,0.12)]">
+              <div className="aspect-video h-full max-w-full overflow-hidden rounded-[24px] border-2 border-dashed border-gray-400 bg-white shadow-[4px_4px_0px_rgba(0,0,0,0.12)]">
                 <div className="flex h-full min-h-0 flex-col">
                   <div className="flex items-center gap-2 border-b border-gray-200 px-4 py-3 text-sm font-black text-gray-700">
                     <FileText size={16} />
-                    {hasDialoguePreview ? '当前尚未生成图片，展示口播稿' : '当前尚未生成图片，展示规划稿'}
+                    {hasDialoguePreview ? '当前尚未生成图片，展示对话' : '当前尚未生成图片，展示规划稿'}
                   </div>
                   <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
                     {hasDialoguePreview ? (
@@ -173,7 +172,7 @@ export function SlideViewer({
             }`}
           >
             <FileText size={18} />
-            {isGeneratingDialogues ? '生成中...' : '生成口播稿'}
+            {isGeneratingDialogues ? '生成中...' : '生成对话'}
           </button>
           <button
             onClick={handleGenerateAudio}
@@ -188,7 +187,7 @@ export function SlideViewer({
             {isGeneratingAudio ? '生成中...' : '生成音频'}
           </button>
           <button
-            onClick={handleOpenSlideAudio}
+            onClick={togglePlayAudio}
             disabled={!canPlayAudio}
             className={`flex min-h-12 items-center justify-center gap-2 rounded-2xl border-2 px-4 py-3 text-sm font-bold transition-all ${
               canPlayAudio
@@ -196,11 +195,21 @@ export function SlideViewer({
                 : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
             }`}
           >
-            <Play size={18} />
-            播放音频
+            {isPlaying ? <Square size={18} /> : <Play size={18} />}
+            {isPlaying ? '停止播放' : '播放音频'}
           </button>
         </div>
       </div>
+      {slideAudioUrl && (
+        <audio
+          ref={audioRef}
+          src={slideAudioUrl}
+          onEnded={() => setIsPlaying(false)}
+          onPause={() => setIsPlaying(false)}
+          onPlay={() => setIsPlaying(true)}
+          className="hidden"
+        />
+      )}
 
       {showModifyDialog ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 px-4">
@@ -218,6 +227,17 @@ export function SlideViewer({
                 <X size={18} />
               </button>
             </div>
+            
+            {slideImageUrl && (
+              <div className="mb-4 aspect-video w-full overflow-hidden rounded-2xl border-2 border-gray-900 bg-[radial-gradient(circle_at_top,#ffffff,#dbeafe)]">
+                <img
+                  src={slideImageUrl}
+                  alt="待修改图片"
+                  className="h-full w-full object-contain"
+                />
+              </div>
+            )}
+
             <textarea
               value={modifyPrompt}
               onChange={(event) => setModifyPrompt(event.target.value)}
